@@ -1345,6 +1345,34 @@ const stripHtml = (html: string) => {
   return doc.body.textContent || '';
 };
 
+const URLInput = styled.input`
+  width: 100%;
+  padding: 0.75rem;
+  border: 2px solid var(--text-tertiary);
+  border-radius: 0.5rem;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 1rem;
+  transition: all 0.2s ease;
+
+  &:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px var(--accent-secondary);
+  }
+
+  &::placeholder {
+    color: var(--text-tertiary);
+  }
+`;
+
+const Instructions = styled.p`
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  margin: 0.5rem 0 1.5rem;
+  line-height: 1.5;
+`;
+
 function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -1364,6 +1392,8 @@ function App() {
   const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
   const [showMappingDialog, setShowMappingDialog] = useState(false);
   const [previewRows, setPreviewRows] = useState<any[]>([]);
+  const [sheetUrl, setSheetUrl] = useState('');
+  const [isValidUrl, setIsValidUrl] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -1673,6 +1703,38 @@ function App() {
     return null;
   };
 
+  // Function to extract sheet ID from URL
+  const extractSheetId = (url: string) => {
+    try {
+      const parsedUrl = new URL(url);
+      if (!parsedUrl.hostname.includes('docs.google.com')) {
+        return null;
+      }
+      
+      // Extract the ID from various Google Sheets URL formats
+      const matches = url.match(/\/d\/(.*?)([\/\?]|$)/);
+      return matches ? matches[1] : null;
+    } catch {
+      return null;
+    }
+  };
+
+  // Handle URL input change
+  const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const url = e.target.value;
+    setSheetUrl(url);
+    
+    const sheetId = extractSheetId(url);
+    setIsValidUrl(!!sheetId);
+    
+    if (sheetId) {
+      // Clear any previous error
+      setUploadError(null);
+    } else if (url) {
+      setUploadError('Please enter a valid Google Sheets URL');
+    }
+  };
+
   return (
     <GlobalStyle isDarkMode={isDarkMode}>
       <Container>
@@ -1698,50 +1760,41 @@ function App() {
         {showSettings ? (
           <>
             <UploadContainer>
-              <DropZone
-                isDragging={isDragging}
-                isError={!!uploadError}
-                onDragEnter={handleDragEnter}
-                onDragOver={handleDragEnter}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onClick={openFileDialog}
-              >
-                <FileInput
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".xlsx,.xls"
-                  onChange={handleFileSelect}
-                />
-                <UploadMessage>
-                  {templateFile ? (
-                    'Drop a new template or click to replace'
-                  ) : (
-                    'Drop your Excel template here or click to browse'
-                  )}
-                </UploadMessage>
-              </DropZone>
+              <h2 style={{ 
+                color: 'var(--text-primary)', 
+                marginTop: 0, 
+                marginBottom: '1rem' 
+              }}>
+                Import Template
+              </h2>
               
+              <Instructions>
+                1. Open your Google Sheet<br />
+                2. Click "Share" and set to "Anyone with the link can view"<br />
+                3. Copy the URL and paste it below
+              </Instructions>
+
+              <URLInput
+                type="url"
+                placeholder="Paste your Google Sheets URL here"
+                value={sheetUrl}
+                onChange={handleUrlChange}
+              />
+
               {uploadError && (
                 <ErrorMessage>{uploadError}</ErrorMessage>
               )}
-              
-              {templateFile && (
-                <FilePreview>
-      <div>
-                    <strong>{templateFile.name}</strong>
-                    <br />
-                    <small>
-                      {(templateFile.size / 1024 / 1024).toFixed(2)} MB
-                    </small>
-      </div>
-                  <Button
-                    onClick={() => setTemplateFile(null)}
-                    style={{ background: 'transparent', color: 'inherit' }}
-                  >
-                    Remove
-                  </Button>
-                </FilePreview>
+
+              {isValidUrl && (
+                <Button
+                  onClick={() => {/* We'll implement this next */}}
+                  style={{ 
+                    marginTop: '1rem',
+                    background: 'var(--accent-primary)'
+                  }}
+                >
+                  Load Template
+                </Button>
               )}
             </UploadContainer>
             
@@ -1764,7 +1817,7 @@ function App() {
                               {mappedField && (
                                 <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
                                   ↓ {mappedField}
-      </div>
+                                </div>
                               )}
                             </PreviewHeader>
                           );
