@@ -189,6 +189,15 @@ const DocumentIcon = () => (
   </svg>
 );
 
+const RefreshIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M21 2v6h-6"></path>
+    <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
+    <path d="M3 22v-6h6"></path>
+    <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
+  </svg>
+);
+
 const ColumnsContainer = styled.div`
   background: var(--bg-secondary);
   padding: 1rem;
@@ -1358,7 +1367,6 @@ const URLInput = styled.input`
   &:focus {
     outline: none;
     border-color: var(--accent-primary);
-    box-shadow: 0 0 0 2px var(--accent-secondary);
   }
 
   &::placeholder {
@@ -1373,11 +1381,563 @@ const Instructions = styled.p`
   line-height: 1.5;
 `;
 
+interface GoogleSheetsConfig {
+  apiKey: string;
+  spreadsheetId: string;
+  range: string;
+}
+
+// Add this interface before the SheetData interface
+interface TextFormat {
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strikethrough?: boolean;
+  fontSize?: number;
+  foregroundColor?: {
+    red: number;
+    green: number;
+    blue: number;
+    alpha?: number;
+  };
+}
+
+interface SheetData {
+  values: string[][];
+  headers: string[];
+  formatting?: {
+    values?: {
+      userEnteredFormat?: {
+        textFormat?: TextFormat;
+        backgroundColor?: {
+          red: number;
+          green: number;
+          blue: number;
+          alpha?: number;
+        };
+        horizontalAlignment?: 'LEFT' | 'CENTER' | 'RIGHT' | 'JUSTIFY';
+        verticalAlignment?: 'TOP' | 'MIDDLE' | 'BOTTOM';
+      };
+    }[];
+  }[];
+  columnMetadata?: {
+    pixelSize: number;
+  }[];
+  rowMetadata?: {
+    pixelSize: number;
+  }[];
+}
+
+const ConfigSection = styled.div`
+  margin-bottom: 2rem;
+`;
+
+const Input = styled.input`
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid var(--bg-tertiary);
+  border-radius: 0.5rem;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  margin-bottom: 1rem;
+  
+  &:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+  }
+`;
+
+const Label = styled.label`
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+`;
+
+const SheetPreview = styled.div`
+  background: var(--bg-secondary);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  box-shadow: var(--shadow-md);
+  margin-top: 1rem;
+  max-width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+`;
+
+const SheetGridContainer = styled.div`
+  flex: 1;
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  background: white;
+  min-height: 0; /* Important for flex child scrolling */
+`;
+
+const SheetGrid = styled.div`
+  display: table;
+  width: 100%;
+  background: white;
+  border-collapse: collapse;
+  font-family: 'Roboto', sans-serif;
+  table-layout: fixed;
+  min-width: max-content;
+  
+  &::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 5px;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 5px;
+    border: 2px solid #f1f1f1;
+    
+    &:hover {
+      background: #a1a1a1;
+    }
+  }
+`;
+
+const SheetRow = styled.div<{ height?: string }>`
+  display: table-row;
+  height: ${props => props.height || '21px'}; // Default Google Sheets row height
+`;
+
+const CornerCell = styled.div`
+  display: table-cell;
+  width: 40px;
+  background: #f1f3f4;
+  border: 1px solid #e5e7eb;
+  position: sticky;
+  left: 0;
+  top: 0;
+  z-index: 20;
+`;
+
+const RowHeader = styled.div`
+  display: table-cell;
+  width: 40px;
+  background: #f1f3f4;
+  border: 1px solid #e5e7eb;
+  font-size: 11px;
+  line-height: 15px;
+  color: #5f6368;
+  text-align: center;
+  position: sticky;
+  left: 0;
+  z-index: 10;
+`;
+
+const SheetCell = styled.div<{ 
+  isHeader?: boolean; 
+  isSelected?: boolean;
+  isEditing?: boolean;
+  width?: string;
+  backgroundColor?: string;
+  textColor?: string;
+  textAlign?: 'left' | 'center' | 'right';
+  fontSize?: string;
+}>`
+  display: table-cell;
+  padding: 3px 6px;
+  border: 1px solid #e5e7eb;
+  background: ${props => 
+    props.backgroundColor ? props.backgroundColor :
+    props.isEditing ? '#e8f0fe' :
+    props.isSelected ? '#e8f0fe' :
+    props.isHeader ? '#f1f3f4' : 'white'};
+  font-size: ${props => props.fontSize || '11px'};
+  line-height: 1.4;
+  color: ${props => props.textColor ? props.textColor : props.isHeader ? '#5f6368' : '#000'};
+  position: relative;
+  vertical-align: middle;
+  width: ${props => props.width || '100px'};
+  min-width: ${props => props.width || '100px'};
+  max-width: ${props => props.width || '100px'};
+  white-space: pre-wrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: ${props => props.textAlign || (props.isHeader ? 'center' : 'left')};
+  
+  ${props => props.isHeader && `
+    font-weight: 500;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  `}
+  
+  &:hover {
+    background: ${props => props.isHeader ? '#e8eaed' : '#f8f9fa'};
+  }
+
+  p {
+    margin: 0;
+  }
+
+  ul, ol {
+    margin: 0;
+    padding-left: 16px;
+  }
+
+  b, strong {
+    font-weight: 600;
+  }
+
+  i, em {
+    font-style: italic;
+  }
+
+  .rich-text-span {
+    display: inline;
+  }
+`;
+
+const CellInput = styled.textarea`
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  padding: 3px 6px;
+  border: 2px solid #1a73e8;
+  background: white;
+  font-size: 11px;
+  line-height: 15px;
+  font-family: inherit;
+  outline: none;
+  z-index: 20;
+  resize: none;
+  overflow: hidden;
+`;
+
+const LoadingOverlay = styled.div`
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+  font-size: 14px;
+  color: #1a73e8;
+`;
+
+interface CellPosition {
+  row: number;
+  col: number;
+}
+
+const RefreshButton = styled(Button)`
+  background-color: var(--accent-primary);
+  padding: 0.5rem;
+  margin-left: 1rem;
+  
+  svg {
+    width: 20px;
+    height: 20px;
+  }
+  
+  &:hover {
+    background-color: var(--accent-secondary);
+    transform: scale(1.05);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+`;
+
+const GoogleSheetsPreview: React.FC<{
+  config: GoogleSheetsConfig;
+  onDataLoaded: (data: SheetData) => void;
+}> = ({ config, onDataLoaded }) => {
+  const [sheetData, setSheetData] = useState<SheetData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedCell, setSelectedCell] = useState<CellPosition | null>(null);
+  const [editingCell, setEditingCell] = useState<CellPosition | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [columnWidths, setColumnWidths] = useState<string[]>([]);
+
+  const fetchSheetData = async () => {
+    try {
+      setLoading(true);
+      // Fetch values
+      const valuesResponse = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values/${config.range}?key=${config.apiKey}`
+      );
+      
+      if (!valuesResponse.ok) {
+        const errorData = await valuesResponse.json();
+        throw new Error(errorData.error?.message || 'Failed to fetch sheet data');
+      }
+
+      const valuesData = await valuesResponse.json();
+
+      // Fetch sheet metadata including dimensions
+      const metadataResponse = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}?key=${config.apiKey}&fields=sheets(properties,data(rowMetadata/pixelSize,columnMetadata/pixelSize,rowData/values/userEnteredFormat))`
+      );
+
+      if (!metadataResponse.ok) {
+        const errorData = await metadataResponse.json();
+        throw new Error(errorData.error?.message || 'Failed to fetch metadata');
+      }
+
+      const metadataData = await metadataResponse.json();
+      const sheetMetadata = metadataData.sheets?.[0];
+
+      if (!sheetMetadata) {
+        throw new Error('No sheet metadata found');
+      }
+      
+      // Get the maximum number of columns from all rows
+      const maxColumns = Math.max(...valuesData.values.map((row: string[]) => row.length));
+      
+      // Normalize all rows to have the same number of columns
+      const normalizedValues = valuesData.values.map((row: string[]) => {
+        const paddedRow = [...row];
+        while (paddedRow.length < maxColumns) {
+          paddedRow.push('');
+        }
+        return paddedRow;
+      });
+
+      // Get column widths from metadata or calculate based on content
+      const columnMetadata = sheetMetadata.data?.[0]?.columnMetadata || [];
+      const widths = Array(maxColumns).fill('').map((_, colIndex) => {
+        // If we have metadata for this column, use it
+        if (columnMetadata[colIndex]?.pixelSize) {
+          return `${columnMetadata[colIndex].pixelSize}px`;
+        }
+        
+        // Otherwise calculate based on content
+        const columnContent = normalizedValues.map((row: string[]) => row[colIndex] || '');
+        const maxContentLength = Math.max(...columnContent.map((content: string) => 
+          content.toString().length
+        ));
+        const calculatedWidth = Math.min(Math.max(maxContentLength * 8, 100), 300);
+        return `${calculatedWidth}px`;
+      });
+      setColumnWidths(widths);
+
+      const headers = normalizedValues[0] || Array(maxColumns).fill('');
+      const values = normalizedValues.slice(1) || [];
+      
+      const sheetData = { 
+        headers, 
+        values,
+        formatting: sheetMetadata.data?.[0]?.rowData || [],
+        columnMetadata: sheetMetadata.data?.[0]?.columnMetadata || [],
+        rowMetadata: sheetMetadata.data?.[0]?.rowMetadata || []
+      };
+      
+      setSheetData(sheetData);
+      onDataLoaded(sheetData);
+      setError(null);
+    } catch (err) {
+      console.error('Fetch error:', err);
+      setError(err instanceof Error ? err.message : 'An error occurred while fetching the sheet data');
+      setSheetData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (config.apiKey && config.spreadsheetId && config.range) {
+      fetchSheetData();
+    }
+  }, [config, onDataLoaded]);
+
+  const handleCellClick = (row: number, col: number) => {
+    setSelectedCell({ row, col });
+    if (row > 0) { // Don't allow editing headers
+      setEditingCell({ row, col });
+      setEditValue(sheetData?.values[row - 1][col] || '');
+    }
+  };
+
+  const handleCellBlur = () => {
+    setEditingCell(null);
+  };
+
+  const handleCellKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      setEditingCell(null);
+    }
+  };
+
+  const renderCellContent = (content: string, rowIndex?: number, colIndex?: number) => {
+    if (!content) return '';
+
+    // Get formatting for this cell if available
+    const cellFormatting = rowIndex !== undefined && colIndex !== undefined
+      ? sheetData?.formatting?.[rowIndex]?.values?.[colIndex]?.userEnteredFormat
+      : null;
+
+    if (cellFormatting) {
+      const style: React.CSSProperties = {};
+      
+      // Apply text formatting
+      if (cellFormatting.textFormat) {
+        if (cellFormatting.textFormat.bold) style.fontWeight = 'bold';
+        if (cellFormatting.textFormat.italic) style.fontStyle = 'italic';
+        if (cellFormatting.textFormat.underline) style.textDecoration = 'underline';
+        if (cellFormatting.textFormat.strikethrough) {
+          style.textDecoration = style.textDecoration 
+            ? `${style.textDecoration} line-through` 
+            : 'line-through';
+        }
+        if (cellFormatting.textFormat.fontSize) {
+          style.fontSize = `${cellFormatting.textFormat.fontSize}pt`;
+        }
+        if (cellFormatting.textFormat.foregroundColor) {
+          const color = cellFormatting.textFormat.foregroundColor;
+          style.color = `rgba(${Math.round(color.red * 255)}, ${Math.round(color.green * 255)}, ${Math.round(color.blue * 255)}, ${color.alpha || 1})`;
+        }
+      }
+
+      // Apply background color
+      if (cellFormatting.backgroundColor) {
+        const bgColor = cellFormatting.backgroundColor;
+        style.backgroundColor = `rgba(${bgColor.red * 255}, ${bgColor.green * 255}, ${bgColor.blue * 255}, ${bgColor.alpha || 1})`;
+      }
+
+      // Apply horizontal alignment
+      if (cellFormatting.horizontalAlignment) {
+        style.textAlign = cellFormatting.horizontalAlignment.toLowerCase() as 'left' | 'center' | 'right' | 'justify';
+      }
+
+      return <span className="rich-text-span" style={style}>{content}</span>;
+    }
+
+    // If no formatting or HTML content
+    if (/<[^>]*>/.test(content)) {
+      return <div dangerouslySetInnerHTML={{ __html: content }} />;
+    }
+
+    return content;
+  };
+
+  if (error) {
+    return (
+      <SheetPreview>
+        <div css={{ color: 'var(--error-color)', padding: '1rem' }}>
+          {error}
+        </div>
+      </SheetPreview>
+    );
+  }
+
+  if (!sheetData) {
+    return (
+      <SheetPreview>
+        <LoadingOverlay>Loading sheet data...</LoadingOverlay>
+      </SheetPreview>
+    );
+  }
+
+  return (
+    <SheetPreview>
+      <div css={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+        <RefreshButton
+          onClick={fetchSheetData}
+          disabled={loading}
+          title="Refresh template data"
+        >
+          <RefreshIcon />
+        </RefreshButton>
+      </div>
+      <SheetGridContainer>
+        <SheetGrid>
+          {/* Corner and Column Headers */}
+          <SheetRow height={sheetData?.rowMetadata?.[0]?.pixelSize ? `${sheetData.rowMetadata[0].pixelSize}px` : undefined}>
+            <CornerCell />
+            {sheetData.headers.map((_, colIndex) => (
+              <SheetCell
+                key={`col-${colIndex}`}
+                isHeader
+                width={columnWidths[colIndex]}
+              >
+                {String.fromCharCode(65 + colIndex)}
+              </SheetCell>
+            ))}
+          </SheetRow>
+
+          {/* Header Row with Data */}
+          <SheetRow height={sheetData?.rowMetadata?.[0]?.pixelSize ? `${sheetData.rowMetadata[0].pixelSize}px` : undefined}>
+            <RowHeader>1</RowHeader>
+            {sheetData.headers.map((header, col) => (
+              <SheetCell
+                key={`header-${col}`}
+                width={columnWidths[col]}
+              >
+                {renderCellContent(header, 0, col)}
+              </SheetCell>
+            ))}
+          </SheetRow>
+
+          {/* Data Rows */}
+          {sheetData.values.map((row, rowIndex) => (
+            <SheetRow 
+              key={`row-${rowIndex}`}
+              height={sheetData?.rowMetadata?.[rowIndex + 1]?.pixelSize ? `${sheetData.rowMetadata[rowIndex + 1].pixelSize}px` : undefined}
+            >
+              <RowHeader>{rowIndex + 2}</RowHeader>
+              {row.map((cell, colIndex) => (
+                <SheetCell
+                  key={`cell-${rowIndex}-${colIndex}`}
+                  isSelected={selectedCell?.row === rowIndex + 1 && selectedCell?.col === colIndex}
+                  onClick={() => handleCellClick(rowIndex + 1, colIndex)}
+                  width={columnWidths[colIndex]}
+                >
+                  {editingCell?.row === rowIndex + 1 && editingCell?.col === colIndex ? (
+                    <CellInput
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onBlur={handleCellBlur}
+                      onKeyDown={handleCellKeyDown}
+                      autoFocus
+                    />
+                  ) : (
+                    renderCellContent(cell, rowIndex + 1, colIndex)
+                  )}
+                </SheetCell>
+              ))}
+            </SheetRow>
+          ))}
+        </SheetGrid>
+      </SheetGridContainer>
+      {loading && <LoadingOverlay>Loading...</LoadingOverlay>}
+    </SheetPreview>
+  );
+};
+
 function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [rows, setRows] = useState<RowData[]>([{ ...emptyRow }]);
-  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  const [rows, setRows] = useState<RowData[]>([]);
+  const [selectedRows, setSelectedRows] = useState<number[]>([]);
+  const [sheetsConfig, setSheetsConfig] = useState<GoogleSheetsConfig>({
+    apiKey: 'AIzaSyCod0xneayl6ZA1JEaX-b8uQLzoHiPcuP4',
+    spreadsheetId: '',
+    range: 'Sheet1!A1:Z1000'
+  });
+  const [spreadsheetUrl, setSpreadsheetUrl] = useState('');
+  const [urlError, setUrlError] = useState<string | null>(null);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [templateFile, setTemplateFile] = useState<TemplateFile | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -1407,44 +1967,45 @@ function App() {
   };
 
   const deleteSelectedRows = () => {
-    const newRows = rows.filter((_, index) => !selectedRows.has(index));
+    const newRows = rows.filter((_, index) => !selectedRows.includes(index));
     setRows(newRows);
-    setSelectedRows(new Set());
+    setSelectedRows([]);
     setIsDeleteModalOpen(false);
   };
 
   const duplicateSelectedRows = () => {
     const newRows = [...rows];
-    const rowsToDuplicate = Array.from(selectedRows).sort((a, b) => b - a);
+    const duplicatedRows = selectedRows
+      .sort((a, b) => b - a) // Sort in descending order to maintain correct indices
+      .reduce((acc, index) => {
+        acc.push({ ...rows[index] });
+        return acc;
+      }, [] as RowData[]);
     
-    rowsToDuplicate.forEach(index => {
-      const duplicatedRow = {
-        ...rows[index],
-        id: crypto.randomUUID()
-      };
-      newRows.splice(index + 1, 0, duplicatedRow);
-    });
-
+    // Insert duplicated rows after the last selected row
+    const lastSelectedIndex = Math.max(...selectedRows);
+    newRows.splice(lastSelectedIndex + 1, 0, ...duplicatedRows);
+    
     setRows(newRows);
-    setSelectedRows(new Set());
+    setSelectedRows([]);
   };
 
   const toggleRowSelection = (index: number) => {
-    const newSelected = new Set(selectedRows);
-    if (newSelected.has(index)) {
-      newSelected.delete(index);
-    } else {
-      newSelected.add(index);
-    }
-    setSelectedRows(newSelected);
+    setSelectedRows(prev => {
+      const isSelected = prev.includes(index);
+      if (isSelected) {
+        return prev.filter(i => i !== index);
+      } else {
+        return [...prev, index];
+      }
+    });
   };
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      const allIndices = new Set(rows.map((_, index) => index));
-      setSelectedRows(allIndices);
+      setSelectedRows(rows.map((_, index) => index));
     } else {
-      setSelectedRows(new Set());
+      setSelectedRows([]);
     }
   };
 
@@ -1475,7 +2036,7 @@ function App() {
             newSelectedRows.add(index);
           }
         });
-        setSelectedRows(newSelectedRows);
+        setSelectedRows(Array.from(newSelectedRows));
 
         return arrayMove(items, oldIndex, newIndex);
       });
@@ -1704,52 +2265,58 @@ function App() {
   };
 
   // Function to extract sheet ID from URL
-  const extractSheetId = (url: string) => {
+  const extractSpreadsheetId = (url: string): string | null => {
     try {
-      const parsedUrl = new URL(url);
-      if (!parsedUrl.hostname.includes('docs.google.com')) {
-        return null;
-      }
-      
-      // Extract the ID from various Google Sheets URL formats
-      const matches = url.match(/\/d\/(.*?)([\/\?]|$)/);
-      return matches ? matches[1] : null;
-    } catch {
+      const regex = /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/;
+      const match = url.match(regex);
+      return match ? match[1] : null;
+    } catch (error) {
       return null;
     }
   };
 
   // Handle URL input change
-  const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSpreadsheetUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const url = e.target.value;
-    setSheetUrl(url);
+    setSpreadsheetUrl(url);
     
-    const sheetId = extractSheetId(url);
-    setIsValidUrl(!!sheetId);
-    
-    if (sheetId) {
-      // Clear any previous error
-      setUploadError(null);
-    } else if (url) {
-      setUploadError('Please enter a valid Google Sheets URL');
+    if (url.trim() === '') {
+      setUrlError(null);
+      setSheetsConfig(prev => ({ ...prev, spreadsheetId: '' }));
+      return;
     }
+
+    const spreadsheetId = extractSpreadsheetId(url);
+    if (spreadsheetId) {
+      setUrlError(null);
+      setSheetsConfig(prev => ({ ...prev, spreadsheetId }));
+    } else {
+      setUrlError('Please enter a valid Google Sheets URL');
+      setSheetsConfig(prev => ({ ...prev, spreadsheetId: '' }));
+    }
+  };
+
+  const handleSheetDataLoaded = (data: SheetData) => {
+    console.log('Sheet data loaded:', data);
+    // We'll implement mapping functionality here later
   };
 
   return (
     <GlobalStyle isDarkMode={isDarkMode}>
       <Container>
         <HeaderContainer>
-          <div style={{ width: '88px' }} /> {/* Spacer to balance the header */}
-          <Title>{showSettings ? 'Settings' : 'SOW Generator'}</Title>
+          <Title>
+            {showSettings ? 'Settings' : 'SOW Generator'}
+          </Title>
           <HeaderActions>
-            <NavButton 
-              onClick={() => setShowSettings(!showSettings)} 
+            <NavButton
+              onClick={() => setShowSettings(!showSettings)}
               title={showSettings ? 'Back to SOW Generator' : 'Settings'}
             >
               {showSettings ? <DocumentIcon /> : <SettingsIcon />}
             </NavButton>
-            <ThemeToggleButton 
-              onClick={() => setIsDarkMode(!isDarkMode)} 
+            <ThemeToggleButton
+              onClick={() => setIsDarkMode(!isDarkMode)}
               title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
             >
               {isDarkMode ? <SunIcon /> : <MoonIcon />}
@@ -1758,169 +2325,50 @@ function App() {
         </HeaderContainer>
 
         {showSettings ? (
-          <>
-            <UploadContainer>
-              <h2 style={{ 
-                color: 'var(--text-primary)', 
-                marginTop: 0, 
-                marginBottom: '1rem' 
-              }}>
-                Import Template
-              </h2>
-              
-              <Instructions>
-                1. Open your Google Sheet<br />
-                2. Click "Share" and set to "Anyone with the link can view"<br />
-                3. Copy the URL and paste it below
-              </Instructions>
-
-              <URLInput
-                type="url"
-                placeholder="Paste your Google Sheets URL here"
-                value={sheetUrl}
-                onChange={handleUrlChange}
-              />
-
-              {uploadError && (
-                <ErrorMessage>{uploadError}</ErrorMessage>
-              )}
-
-              {isValidUrl && (
-                <Button
-                  onClick={() => {/* We'll implement this next */}}
-                  style={{ 
-                    marginTop: '1rem',
-                    background: 'var(--accent-primary)'
-                  }}
-                >
-                  Load Template
-                </Button>
-              )}
-            </UploadContainer>
+      <div>
+            <ConfigSection>
+              <h2 css={{ marginBottom: '1rem', color: 'var(--text-primary)' }}>Template Configuration</h2>
+              <div css={{ marginBottom: '2rem' }}>
+                <Label htmlFor="spreadsheetUrl">Google Sheets Template URL</Label>
+                <Input
+                  id="spreadsheetUrl"
+                  value={spreadsheetUrl}
+                  onChange={handleSpreadsheetUrlChange}
+                  placeholder="Paste your Google Sheets URL here"
+                  css={{ marginBottom: '0.5rem' }}
+                />
+                {urlError && (
+                  <div css={{ 
+                    color: 'var(--error-color)',
+                    fontSize: '0.875rem',
+                    marginTop: '0.25rem'
+                  }}>
+                    {urlError}
+      </div>
+                )}
+                <div css={{ 
+                  fontSize: '0.875rem',
+                  color: 'var(--text-secondary)',
+                  marginTop: '0.5rem'
+                }}>
+                  Steps to share your template:
+                  <ol css={{ marginTop: '0.5rem', paddingLeft: '1.25rem' }}>
+                    <li>Open your Google Sheet template</li>
+                    <li>Click "Share" in the top right</li>
+                    <li>Set access to "Anyone with the link can view"</li>
+                    <li>Copy the URL and paste it above</li>
+                  </ol>
+      </div>
+              </div>
+            </ConfigSection>
             
-            {templateData.columns.length > 0 && (
-              <>
-                <PreviewContainer>
-                  <PreviewTable>
-                    <thead>
-                      <tr>
-                        {templateData.columns.map((column) => {
-                          const mappedField = getMappedField(column);
-                          return (
-                            <PreviewHeader
-                              key={column}
-                              isSelected={!!mappedField}
-                              onClick={() => handleColumnSelect(column)}
-                              title={mappedField ? `Mapped to ${mappedField}` : 'Click to map this column'}
-                            >
-                              {column}
-                              {mappedField && (
-                                <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>
-                                  ↓ {mappedField}
-                                </div>
-                              )}
-                            </PreviewHeader>
-                          );
-                        })}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {previewRows.map((row, rowIndex) => (
-                        <tr key={rowIndex}>
-                          {templateData.columns.map((column, colIndex) => (
-                            <PreviewCell key={`${rowIndex}-${colIndex}`}>
-                              {row[colIndex]}
-                            </PreviewCell>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </PreviewTable>
-                </PreviewContainer>
-
-                <SaveButton
-                  onClick={saveMapping}
-                  disabled={!isMappingValid()}
-                  style={{ margin: '1.5rem auto', display: 'block' }}
-                >
-                  Save Template Mapping
-                </SaveButton>
-
-                {templateData.rows.length > 0 && templateData.mapping && (
-                  <ApplyButton
-                    onClick={applyTemplateData}
-                    disabled={!isMappingValid()}
-                    style={{ margin: '1rem auto', display: 'block' }}
-                  >
-                    Apply Template Data ({templateData.rows.length} rows)
-                  </ApplyButton>
-                )}
-
-                {saveMessage && (
-                  <SaveMessage success={saveMessage.success}>
-                    {saveMessage.success ? (
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
-                        <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" fill="none"/>
-                      </svg>
-                    ) : (
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
-                        <path d="M12 9v4M12 17h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" fill="none"/>
-                      </svg>
-                    )}
-                    {saveMessage.text}
-                  </SaveMessage>
-                )}
-              </>
+            {sheetsConfig.spreadsheetId && (
+              <GoogleSheetsPreview
+                config={sheetsConfig}
+                onDataLoaded={handleSheetDataLoaded}
+              />
             )}
-
-            {showMappingDialog && selectedColumn && (
-              <MappingOverlay onClick={() => setShowMappingDialog(false)}>
-                <MappingDialog onClick={(e) => e.stopPropagation()}>
-                  <h3 style={{ margin: '0 0 1rem 0', color: 'var(--text-primary)' }}>
-                    Map column: {selectedColumn}
-                  </h3>
-                  <MappingOptions>
-                    <MappingOption
-                      isSelected={templateData.mapping?.processAndImpact === selectedColumn}
-                      onClick={() => handleMappingSelect('processAndImpact')}
-                    >
-                      Process and Impact
-                    </MappingOption>
-                    <MappingOption
-                      isSelected={templateData.mapping?.components === selectedColumn}
-                      onClick={() => handleMappingSelect('components')}
-                    >
-                      Components
-                    </MappingOption>
-                    <MappingOption
-                      isSelected={templateData.mapping?.assumptions === selectedColumn}
-                      onClick={() => handleMappingSelect('assumptions')}
-                    >
-                      Assumptions
-                    </MappingOption>
-                    <MappingOption
-                      isSelected={templateData.mapping?.hours === selectedColumn}
-                      onClick={() => handleMappingSelect('hours')}
-                    >
-                      Hours
-                    </MappingOption>
-                    <MappingOption
-                      isSelected={templateData.mapping?.notes === selectedColumn}
-                      onClick={() => handleMappingSelect('notes')}
-                    >
-                      Notes
-                    </MappingOption>
-                  </MappingOptions>
-                  <Button 
-                    onClick={() => setShowMappingDialog(false)}
-                    style={{ width: '100%', marginTop: '1rem' }}
-                  >
-                    Cancel
-                  </Button>
-                </MappingDialog>
-              </MappingOverlay>
-            )}
-          </>
+          </div>
         ) : (
           // SOW Generator Content
           <>
@@ -1930,7 +2378,7 @@ function App() {
                   <HeaderCheckboxContainer>
                     <Checkbox
                       type="checkbox"
-                      checked={selectedRows.size === rows.length && rows.length > 0}
+                      checked={selectedRows.length === rows.length && rows.length > 0}
                       onChange={(e) => handleSelectAll(e.target.checked)}
                     />
                   </HeaderCheckboxContainer>
@@ -1958,7 +2406,7 @@ function App() {
                         id={row.id}
                         index={index}
                         row={row}
-                        isSelected={selectedRows.has(index)}
+                        isSelected={selectedRows.includes(index)}
                         onToggleSelect={() => toggleRowSelection(index)}
                         onUpdateRow={(field, value) => updateRow(index, field, value)}
                       />
@@ -1976,14 +2424,14 @@ function App() {
                 </AddRowButton>
                 <DeleteButton
                   onClick={() => setIsDeleteModalOpen(true)}
-                  disabled={selectedRows.size === 0}
+                  disabled={selectedRows.length === 0}
                 >
                   <DeleteIcon />
                   Delete Row
                 </DeleteButton>
                 <DuplicateButton
                   onClick={duplicateSelectedRows}
-                  disabled={selectedRows.size === 0}
+                  disabled={selectedRows.length === 0}
                 >
                   <DuplicateIcon />
                   Duplicate Row
@@ -2004,7 +2452,7 @@ function App() {
               onClose={() => setIsDeleteModalOpen(false)}
               onConfirm={deleteSelectedRows}
               title="Delete Selected Rows"
-              message={`Are you sure you want to delete ${selectedRows.size} selected row${selectedRows.size === 1 ? '' : 's'}?`}
+              message={`Are you sure you want to delete ${selectedRows.length} selected row${selectedRows.length === 1 ? '' : 's'}?`}
               confirmText="Delete"
               cancelText="Cancel"
             />
