@@ -1402,6 +1402,39 @@ interface TextFormat {
   };
 }
 
+// Add these interfaces before the SheetData interface
+interface SheetProperties {
+  sheetId: number;
+  title: string;
+  gridProperties: {
+    rowCount: number;
+    columnCount: number;
+  };
+}
+
+interface Sheet {
+  properties: SheetProperties;
+  data: {
+    rowMetadata?: { pixelSize: number }[];
+    columnMetadata?: { pixelSize: number }[];
+    rowData?: {
+      values?: {
+        userEnteredFormat?: {
+          textFormat?: TextFormat;
+          backgroundColor?: {
+            red: number;
+            green: number;
+            blue: number;
+            alpha?: number;
+          };
+          horizontalAlignment?: 'LEFT' | 'CENTER' | 'RIGHT' | 'JUSTIFY';
+          verticalAlignment?: 'TOP' | 'MIDDLE' | 'BOTTOM';
+        };
+      }[];
+    }[];
+  }[];
+}
+
 interface SheetData {
   values: string[][];
   headers: string[];
@@ -1673,9 +1706,27 @@ const GoogleSheetsPreview: React.FC<{
   const fetchSheetData = async () => {
     try {
       setLoading(true);
-      // Fetch values
+      
+      // First, fetch the spreadsheet metadata to get the sheet name
+      const spreadsheetResponse = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}?key=${config.apiKey}`
+      );
+      
+      if (!spreadsheetResponse.ok) {
+        const errorData = await spreadsheetResponse.json();
+        throw new Error(errorData.error?.message || 'Failed to fetch spreadsheet metadata');
+      }
+
+      const spreadsheetData = await spreadsheetResponse.json();
+      const firstSheet = spreadsheetData.sheets?.[0];
+      const sheetTitle = firstSheet?.properties?.title || 'Sheet1';
+      
+      // Use the actual sheet name in the range
+      const range = `${sheetTitle}!A1:Z1000`;
+      
+      // Fetch values with the correct sheet name
       const valuesResponse = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values/${config.range}?key=${config.apiKey}`
+        `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}/values/${encodeURIComponent(range)}?key=${config.apiKey}`
       );
       
       if (!valuesResponse.ok) {
@@ -1687,7 +1738,7 @@ const GoogleSheetsPreview: React.FC<{
 
       // Fetch sheet metadata including dimensions
       const metadataResponse = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}?key=${config.apiKey}&fields=sheets(properties,data(rowMetadata/pixelSize,columnMetadata/pixelSize,rowData/values/userEnteredFormat))`
+        `https://sheets.googleapis.com/v4/spreadsheets/${config.spreadsheetId}?key=${config.apiKey}&fields=sheets(properties(sheetId,title,gridProperties),data(rowMetadata/pixelSize,columnMetadata/pixelSize,rowData/values/userEnteredFormat))`
       );
 
       if (!metadataResponse.ok) {
@@ -1696,7 +1747,7 @@ const GoogleSheetsPreview: React.FC<{
       }
 
       const metadataData = await metadataResponse.json();
-      const sheetMetadata = metadataData.sheets?.[0];
+      const sheetMetadata = metadataData.sheets?.find((sheet: Sheet) => sheet.properties?.title === sheetTitle) || metadataData.sheets?.[0];
 
       if (!sheetMetadata) {
         throw new Error('No sheet metadata found');
