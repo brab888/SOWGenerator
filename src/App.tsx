@@ -1983,7 +1983,7 @@ function App() {
   const [rows, setRows] = useState<RowData[]>([]);
   const [selectedRows, setSelectedRows] = useState<number[]>([]);
   const [sheetsConfig, setSheetsConfig] = useState<GoogleSheetsConfig>({
-    apiKey: 'AIzaSyCod0xneayl6ZA1JEaX-b8uQLzoHiPcuP4',
+    apiKey: import.meta.env.VITE_GOOGLE_SHEETS_API_KEY || '',
     spreadsheetId: '',
     range: 'Sheet1!A1:Z1000'
   });
