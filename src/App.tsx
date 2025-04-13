@@ -42,6 +42,20 @@ interface Theme {
   '--shadow-lg': string;
 }
 
+interface RoleHours {
+  sa: string;
+  consultant: string;
+  pm: string;
+  el: string;
+  specialty: string;
+}
+
+// Add new interface for Hypercare after RoleHours interface
+interface Hypercare {
+  hours: string;
+  weeks: string;
+}
+
 const lightTheme: Theme = {
   '--bg-primary': '#f8fafc',
   '--bg-secondary': '#ffffff',
@@ -1436,8 +1450,9 @@ interface Sheet {
 }
 
 interface SheetData {
-  values: string[][];
   headers: string[];
+  values: string[][];
+  outOfScopeItems?: string[][];
   formatting?: {
     values?: {
       userEnteredFormat?: {
@@ -1786,12 +1801,29 @@ const GoogleSheetsPreview: React.FC<{
       const headers = normalizedValues[0] || Array(maxColumns).fill('');
       const values = normalizedValues.slice(1) || [];
       
+      interface SheetRowValue {
+        userEnteredFormat?: {
+          textFormat?: {
+            strikethrough?: boolean;
+          };
+        };
+      }
+
+      interface SheetRow {
+        values?: SheetRowValue[];
+      }
+      
       const sheetData = { 
         headers, 
         values,
         formatting: sheetMetadata.data?.[0]?.rowData || [],
         columnMetadata: sheetMetadata.data?.[0]?.columnMetadata || [],
-        rowMetadata: sheetMetadata.data?.[0]?.rowMetadata || []
+        rowMetadata: sheetMetadata.data?.[0]?.rowMetadata || [],
+        outOfScopeItems: sheetMetadata.data?.[0]?.rowData?.find((row: SheetRow) => 
+          row.values?.some((value: SheetRowValue) => 
+            value.userEnteredFormat?.textFormat?.strikethrough
+          )
+        )?.values?.slice(1) || [['']]
       };
       
       setSheetData(sheetData);
@@ -2005,6 +2037,25 @@ function App() {
   const [previewRows, setPreviewRows] = useState<any[]>([]);
   const [sheetUrl, setSheetUrl] = useState('');
   const [isValidUrl, setIsValidUrl] = useState(false);
+  const [outOfScopeItems, setOutOfScopeItems] = useState<string[][]>([['']]);
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Add state for selected out of scope items
+  const [selectedOutOfScopeItems, setSelectedOutOfScopeItems] = useState<number[]>([]);
+  const [isDeleteOutOfScopeModalOpen, setIsDeleteOutOfScopeModalOpen] = useState(false);
+  // Add new interface for role hours
+  const [roleHours, setRoleHours] = useState<RoleHours>({
+    sa: '',
+    consultant: '',
+    pm: '',
+    el: '',
+    specialty: ''
+  });
+  // Add state for Hypercare after roleHours state
+  const [hypercare, setHypercare] = useState<Hypercare>({
+    hours: '',
+    weeks: ''
+  });
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -2352,6 +2403,137 @@ function App() {
     // We'll implement mapping functionality here later
   };
 
+  const handleOutOfScopeItemChange = (rowIndex: number, value: string) => {
+    const newOutOfScopeItems = [...outOfScopeItems];
+    newOutOfScopeItems[rowIndex] = [value];
+    setOutOfScopeItems(newOutOfScopeItems);
+  };
+
+  const handleAddOutOfScopeItem = () => {
+    setOutOfScopeItems([...outOfScopeItems, ['']]);
+  };
+
+  const handleDeleteOutOfScopeItem = (index: number) => {
+    const newOutOfScopeItems = outOfScopeItems.filter((_, i) => i !== index);
+    setOutOfScopeItems(newOutOfScopeItems);
+  };
+
+  const handleDuplicateOutOfScopeItem = (index: number) => {
+    const newOutOfScopeItems = [...outOfScopeItems];
+    newOutOfScopeItems.splice(index + 1, 0, [...outOfScopeItems[index]]);
+    setOutOfScopeItems(newOutOfScopeItems);
+  };
+
+  // Update the exportToSheets function to include out of scope items
+  const exportToSheets = async () => {
+    try {
+      setExporting(true);
+      const processData = rows.map(row => ['• ' + row.processAndImpact]);
+      const componentData = rows.map(row => ['• ' + row.components]);
+      const outOfScopeData = outOfScopeItems.map(item => ['• ' + item[0]]);
+      
+      const data = {
+        headers: ['SOW Generator'],
+        values: [
+          ['Process and Impact:'],
+          ...processData,
+          [''],
+          ['Components:'],
+          ...componentData,
+          [''],
+          ['Total Build Hours:', calculateTotal()],
+          [''],
+          ['Out of Scope Items:'],
+          ...outOfScopeData,
+          ['']
+        ]
+      };
+
+      // ... rest of existing export function ...
+    } catch (error) {
+      console.error('Export error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to export to Sheets');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Add handlers for out of scope items selection
+  const toggleOutOfScopeItemSelection = (index: number) => {
+    setSelectedOutOfScopeItems(prev => {
+      const isSelected = prev.includes(index);
+      if (isSelected) {
+        return prev.filter(i => i !== index);
+      } else {
+        return [...prev, index];
+      }
+    });
+  };
+
+  const handleSelectAllOutOfScope = (checked: boolean) => {
+    if (checked) {
+      setSelectedOutOfScopeItems(outOfScopeItems.map((_, index) => index));
+    } else {
+      setSelectedOutOfScopeItems([]);
+    }
+  };
+
+  const deleteSelectedOutOfScopeItems = () => {
+    const newItems = outOfScopeItems.filter((_, index) => !selectedOutOfScopeItems.includes(index));
+    setOutOfScopeItems(newItems);
+    setSelectedOutOfScopeItems([]);
+    setIsDeleteOutOfScopeModalOpen(false);
+  };
+
+  const duplicateSelectedOutOfScopeItems = () => {
+    const newItems = [...outOfScopeItems];
+    const duplicatedItems = selectedOutOfScopeItems
+      .sort((a, b) => b - a)
+      .reduce((acc, index) => {
+        acc.push([...outOfScopeItems[index]]);
+        return acc;
+      }, [] as string[][]);
+    
+    const lastSelectedIndex = Math.max(...selectedOutOfScopeItems);
+    newItems.splice(lastSelectedIndex + 1, 0, ...duplicatedItems);
+    
+    setOutOfScopeItems(newItems);
+    setSelectedOutOfScopeItems([]);
+  };
+
+  // Add handler for updating role hours
+  const handleRoleHoursChange = (role: keyof RoleHours, value: string) => {
+    setRoleHours(prev => ({
+      ...prev,
+      [role]: value
+    }));
+  };
+
+  // Add new styled component for the select dropdown after NumberInput
+  const RoleSelect = styled.select`
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--text-tertiary);
+    border-radius: 0.25rem;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    text-align: center;
+    
+    &:focus {
+      outline: none;
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 2px var(--accent-secondary);
+    }
+  `;
+
+  // Add handler for Hypercare changes after handleRoleHoursChange
+  const handleHypercareChange = (field: keyof Hypercare, value: string) => {
+    setHypercare(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
   return (
     <GlobalStyle isDarkMode={isDarkMode}>
       <Container>
@@ -2498,12 +2680,328 @@ function App() {
               </TotalSection>
             </TotalContainer>
 
+            {/* Add Out of Scope Items and Hours by Role sections in a flex container */}
+            <div css={{ 
+              display: 'flex', 
+              gap: '2rem',
+              marginTop: '2rem',
+              alignItems: 'flex-start'  // This prevents containers from stretching to match heights
+            }}>
+              {/* Out of Scope Items section */}
+              <ColumnsContainer css={{ 
+                flex: 1,
+                minWidth: '50%',
+                maxWidth: '100%'
+              }}>
+                <HeaderRow css={{ 
+                  marginBottom: '1rem',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  padding: '0.5rem',
+                  width: '100%'
+                }}>
+                  <ColumnHeader css={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center',
+                    width: '100%',
+                    padding: '0.5rem 1rem'
+                  }}>
+                    <div css={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      <HeaderCheckboxContainer>
+                        <Checkbox
+                          type="checkbox"
+                          checked={selectedOutOfScopeItems.length === outOfScopeItems.length && outOfScopeItems.length > 0}
+                          onChange={(e) => handleSelectAllOutOfScope(e.target.checked)}
+                        />
+                      </HeaderCheckboxContainer>
+                      <span>Out of Scope Items</span>
+                    </div>
+                    <ActionButtons>
+                      <AddRowButton 
+                        onClick={handleAddOutOfScopeItem}
+                        css={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
+                      >
+                        <AddIcon />
+                        Add Item
+                      </AddRowButton>
+                      <DeleteButton
+                        onClick={() => setIsDeleteOutOfScopeModalOpen(true)}
+                        disabled={selectedOutOfScopeItems.length === 0}
+                        css={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
+                      >
+                        <DeleteIcon />
+                        Delete Item
+                      </DeleteButton>
+                      <DuplicateButton
+                        onClick={duplicateSelectedOutOfScopeItems}
+                        disabled={selectedOutOfScopeItems.length === 0}
+                        css={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
+                      >
+                        <DuplicateIcon />
+                        Duplicate Item
+                      </DuplicateButton>
+                    </ActionButtons>
+                  </ColumnHeader>
+                </HeaderRow>
+
+                <RowsContainer>
+                  {outOfScopeItems.map((item, index) => (
+                    <RowWrapper key={index} css={{ 
+                      display: 'flex',
+                      gap: '1rem',
+                      width: '100%'
+                    }}>
+                      <CheckboxContainer css={{ flex: '0 0 40px' }}>
+                        <Checkbox
+                          type="checkbox"
+                          checked={selectedOutOfScopeItems.includes(index)}
+                          onChange={() => toggleOutOfScopeItemSelection(index)}
+                        />
+                      </CheckboxContainer>
+                      <EditorContainer css={{ 
+                        flex: '1',
+                        '& .ProseMirror': { 
+                          minHeight: '21px !important',  // Added !important
+                          height: 'auto !important',     // Added !important
+                          maxHeight: '200px !important', // Added !important
+                          width: '100%',
+                          maxWidth: '800px',
+                          padding: '3px 8px',
+                          overflowY: 'auto',
+                          lineHeight: '1.2',  // Add line height control
+                          fontSize: '14px'    // Control font size
+                        },
+                        '& .ProseMirror p': {  // Target paragraphs specifically
+                          margin: '0',
+                          padding: '0'
+                        }
+                      }}>
+                        <RichTextEditor
+                          content={item[0]}
+                          onChange={(value) => handleOutOfScopeItemChange(index, value)}
+                        />
+                      </EditorContainer>
+                    </RowWrapper>
+                  ))}
+                </RowsContainer>
+              </ColumnsContainer>
+
+              {/* Hours by Role section */}
+              <ColumnsContainer css={{ 
+                flex: '0 0 400px',  // Fixed width instead of flex: 1
+                minWidth: 'auto',   // Remove minWidth constraint
+                maxWidth: '400px'   // Match fixed width
+              }}>
+                <HeaderRow css={{ 
+                  marginBottom: '1rem',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  padding: '0.5rem',
+                  width: '100%'
+                }}>
+                  <ColumnHeader css={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center',
+                    width: '100%',
+                    padding: '0.5rem 1rem'
+                  }}>
+                    <span>Hours by Role</span>
+                  </ColumnHeader>
+                </HeaderRow>
+
+                <RowsContainer css={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.75rem',
+                  padding: '0.5rem 1rem'
+                }}>
+                  {/* SA Hours */}
+                  <div css={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '1rem'
+                  }}>
+                    <span css={{ 
+                      color: 'var(--text-primary)',
+                      fontWeight: 500,
+                      flex: '1'
+                    }}>
+                      SA Hours Per Week
+                    </span>
+                    <NumberInputContainer css={{ width: '120px' }}>
+                      <NumberInput
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={roleHours.sa}
+                        onChange={(e) => handleRoleHoursChange('sa', e.target.value)}
+                      />
+                    </NumberInputContainer>
+                  </div>
+
+                  {/* Consultant Hours */}
+                  <div css={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '1rem'
+                  }}>
+                    <span css={{ 
+                      color: 'var(--text-primary)',
+                      fontWeight: 500,
+                      flex: '1'
+                    }}>
+                      Consultant Hours Per Week
+                    </span>
+                    <NumberInputContainer css={{ width: '120px' }}>
+                      <NumberInput
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={roleHours.consultant}
+                        onChange={(e) => handleRoleHoursChange('consultant', e.target.value)}
+                      />
+                    </NumberInputContainer>
+                  </div>
+
+                  {/* PM Hours */}
+                  <div css={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '1rem'
+                  }}>
+                    <span css={{ 
+                      color: 'var(--text-primary)',
+                      fontWeight: 500,
+                      flex: '1'
+                    }}>
+                      PM Hours Per Week
+                    </span>
+                    <NumberInputContainer css={{ width: '120px' }}>
+                      <RoleSelect
+                        value={roleHours.pm}
+                        onChange={(e) => handleRoleHoursChange('pm', e.target.value)}
+                      >
+                        <option value="0">0</option>
+                        <option value="20">20</option>
+                        <option value="40">40</option>
+                      </RoleSelect>
+                    </NumberInputContainer>
+                  </div>
+
+                  {/* EL Hours */}
+                  <div css={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '1rem'
+                  }}>
+                    <span css={{ 
+                      color: 'var(--text-primary)',
+                      fontWeight: 500,
+                      flex: '1'
+                    }}>
+                      EL Hours Per Week
+                    </span>
+                    <NumberInputContainer css={{ width: '120px' }}>
+                      <NumberInput
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={roleHours.el}
+                        onChange={(e) => handleRoleHoursChange('el', e.target.value)}
+                      />
+                    </NumberInputContainer>
+                  </div>
+
+                  {/* Specialty Resource Hours */}
+                  <div css={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '1rem'
+                  }}>
+                    <span css={{ 
+                      color: 'var(--text-primary)',
+                      fontWeight: 500,
+                      flex: '1'
+                    }}>
+                      Specialty Resource Hours
+                    </span>
+                    <NumberInputContainer css={{ width: '120px' }}>
+                      <NumberInput
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={roleHours.specialty}
+                        onChange={(e) => handleRoleHoursChange('specialty', e.target.value)}
+                      />
+                    </NumberInputContainer>
+                  </div>
+
+                  {/* Add Hypercare section */}
+                  <HeaderRow css={{ 
+                    marginBottom: '1rem',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    padding: '0.5rem',
+                    width: '100%',
+                    marginTop: '1rem'  // Reduced from 2rem
+                  }}>
+                    <ColumnHeader css={{ 
+                      display: 'flex', 
+                      alignItems: 'center',  // Changed from space-between since we only have the title
+                      width: '100%',
+                      padding: '0.5rem 1rem',
+                      justifyContent: 'flex-start'  // Add this to align text to the left
+                    }}>
+                      <span>Hypercare</span>
+                    </ColumnHeader>
+                  </HeaderRow>
+
+                  <div css={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.5rem 1rem',
+                    width: '100%'  // Added to ensure full width
+                  }}>
+                    <NumberInputContainer css={{ width: '80px' }}>
+                      <NumberInput
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={hypercare.hours}
+                        onChange={(e) => handleHypercareChange('hours', e.target.value)}
+                      />
+                    </NumberInputContainer>
+                    <span css={{ color: 'var(--text-primary)' }}>hours for</span>
+                    <NumberInputContainer css={{ width: '80px' }}>
+                      <NumberInput
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={hypercare.weeks}
+                        onChange={(e) => handleHypercareChange('weeks', e.target.value)}
+                      />
+                    </NumberInputContainer>
+                    <span css={{ color: 'var(--text-primary)' }}>weeks</span>
+                  </div>
+                </RowsContainer>
+              </ColumnsContainer>
+            </div>
+
+            {/* Add delete confirmation modal for out of scope items */}
             <ConfirmationModal
-              isOpen={isDeleteModalOpen}
-              onClose={() => setIsDeleteModalOpen(false)}
-              onConfirm={deleteSelectedRows}
-              title="Delete Selected Rows"
-              message={`Are you sure you want to delete ${selectedRows.length} selected row${selectedRows.length === 1 ? '' : 's'}?`}
+              isOpen={isDeleteOutOfScopeModalOpen}
+              onClose={() => setIsDeleteOutOfScopeModalOpen(false)}
+              onConfirm={deleteSelectedOutOfScopeItems}
+              title="Delete Selected Items"
+              message={`Are you sure you want to delete ${selectedOutOfScopeItems.length} selected item${selectedOutOfScopeItems.length === 1 ? '' : 's'}?`}
               confirmText="Delete"
               cancelText="Cancel"
             />
