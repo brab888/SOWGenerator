@@ -26,6 +26,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import logo from './logo.svg';
 import './App.css';
+import { CellMappingPanel } from './components/CellMappingPanel';
 
 interface Theme {
   '--bg-primary': string;
@@ -54,6 +55,19 @@ interface RoleHours {
 interface Hypercare {
   hours: string;
   weeks: string;
+}
+
+// Add after other interfaces
+interface CellMapping {
+  sourceId: string;
+  targetCell: {
+    row: number;
+    col: number;
+  };
+}
+
+interface ButtonProps {
+  // ... existing ButtonProps interface ...
 }
 
 const lightTheme: Theme = {
@@ -1080,14 +1094,6 @@ const DuplicateIcon = () => (
   </svg>
 );
 
-const ExportIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-    <polyline points="7 10 12 15 17 10"></polyline>
-    <line x1="12" y1="15" x2="12" y2="3"></line>
-  </svg>
-);
-
 const ThemeIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <circle cx="12" cy="12" r="5"></circle>
@@ -1505,7 +1511,7 @@ const Label = styled.label`
 const SheetPreview = styled.div`
   background: var(--bg-secondary);
   border-radius: 0.75rem;
-  padding: 1rem;
+  padding: 0;  // Remove padding
   box-shadow: var(--shadow-md);
   margin-top: 1rem;
   max-width: 100%;
@@ -1518,7 +1524,7 @@ const SheetGridContainer = styled.div`
   flex: 1;
   overflow: auto;
   border: 1px solid #e5e7eb;
-  border-radius: 4px;
+  border-radius: 0.75rem;  // Match parent's border radius
   background: white;
   min-height: 0; /* Important for flex child scrolling */
 `;
@@ -1592,11 +1598,14 @@ const SheetCell = styled.div<{
   textColor?: string;
   textAlign?: 'left' | 'center' | 'right';
   fontSize?: string;
+  isHighlighted?: boolean;
+  isMapped?: boolean;
 }>`
   display: table-cell;
   padding: 3px 6px;
   border: 1px solid #e5e7eb;
   background: ${props => 
+    props.isMapped ? 'rgba(37, 99, 235, 0.1)' :  // Light blue background for mapped cells
     props.backgroundColor ? props.backgroundColor :
     props.isEditing ? '#e8f0fe' :
     props.isSelected ? '#e8f0fe' :
@@ -1622,29 +1631,60 @@ const SheetCell = styled.div<{
   `}
   
   &:hover {
-    background: ${props => props.isHeader ? '#e8eaed' : '#f8f9fa'};
+    background: ${props => 
+      props.isMapped ? 'rgba(37, 99, 235, 0.15)' :  // Slightly darker on hover
+      props.isHeader ? '#e8eaed' : '#f8f9fa'};
   }
 
-  p {
-    margin: 0;
-  }
+  ${props => props.isHighlighted && !props.isMapped && `
+    background-color: var(--accent-secondary) !important;
+    opacity: 0.7;
+  `}
 
-  ul, ol {
-    margin: 0;
-    padding-left: 16px;
-  }
+  ${props => props.isMapped && `
+    border: 2px solid rgba(37, 99, 235, 0.3);
+    padding-top: 12px; /* Make room for the field title */
 
-  b, strong {
-    font-weight: 600;
-  }
+    &::before {
+      content: attr(data-field-title);
+      position: absolute;
+      top: 2px;
+      left: 6px;
+      font-size: 9px;
+      color: rgba(0, 0, 0, 0.4);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
 
-  i, em {
-    font-style: italic;
-  }
+    .delete-mapping {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      width: 12px;
+      height: 12px;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: none;
+      background: none;
+      color: var(--text-tertiary);
+      cursor: pointer;
+      opacity: 0.6;
+      transition: all 0.2s ease;
 
-  .rich-text-span {
-    display: inline;
-  }
+      &:hover {
+        opacity: 1;
+        color: var(--error-color);
+      }
+
+      svg {
+        width: 10px;
+        height: 10px;
+      }
+    }
+  `}
 `;
 
 const CellInput = styled.textarea`
@@ -1709,7 +1749,10 @@ const RefreshButton = styled(Button)`
 const GoogleSheetsPreview: React.FC<{
   config: GoogleSheetsConfig;
   onDataLoaded: (data: SheetData) => void;
-}> = ({ config, onDataLoaded }) => {
+  setLastMapping: (mapping: CellMapping | null) => void;
+  setCellMappings: React.Dispatch<React.SetStateAction<CellMapping[]>>;
+  cellMappings: CellMapping[];
+}> = ({ config, onDataLoaded, setLastMapping, setCellMappings, cellMappings }) => {
   const [sheetData, setSheetData] = useState<SheetData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1717,6 +1760,7 @@ const GoogleSheetsPreview: React.FC<{
   const [editingCell, setEditingCell] = useState<CellPosition | null>(null);
   const [editValue, setEditValue] = useState('');
   const [columnWidths, setColumnWidths] = useState<string[]>([]);
+  const [dragOverCell, setDragOverCell] = useState<CellPosition | null>(null);
 
   const fetchSheetData = async () => {
     try {
@@ -1915,6 +1959,121 @@ const GoogleSheetsPreview: React.FC<{
     return content;
   };
 
+  const handleDragOver = (e: React.DragEvent, row: number, col: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverCell({ row, col });
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverCell(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, row: number, col: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverCell(null);
+    
+    const fieldId = e.dataTransfer.getData('text/plain');
+    if (fieldId) {
+      const newMapping: CellMapping = {
+        sourceId: fieldId,
+        targetCell: { row, col }
+      };
+      setLastMapping(newMapping);
+      setCellMappings((prev: CellMapping[]) => [...prev, newMapping]);
+    }
+  };
+
+  // Update the SheetCell component in the render method
+  const renderCell = (content: string, row: number, col: number) => {
+    const mapping = cellMappings.find(
+      mapping => mapping.targetCell.row === row && mapping.targetCell.col === col
+    );
+
+    const getFieldTitle = (sourceId: string) => {
+      const fieldMap: { [key: string]: string } = {
+        'process': 'Process & Impact',
+        'components': 'Components',
+        'assumptions': 'Assumptions',
+        'hours': 'Hours',
+        'notes': 'Notes',
+        'outOfScope': 'Out of Scope Items',
+        'roleHours': 'Role Hours',
+        'hypercare': 'Hypercare'
+      };
+      return fieldMap[sourceId] || sourceId;
+    };
+
+    const handleDeleteMapping = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (mapping) {
+        setCellMappings(prev => prev.filter(m => 
+          m.targetCell.row !== mapping.targetCell.row || 
+          m.targetCell.col !== mapping.targetCell.col
+        ));
+      }
+    };
+
+    return (
+      <SheetCell
+        key={`cell-${row}-${col}`}
+        isSelected={selectedCell?.row === row && selectedCell?.col === col}
+        isHighlighted={dragOverCell?.row === row && dragOverCell?.col === col}
+        isMapped={!!mapping}
+        onClick={() => handleCellClick(row, col)}
+        onDragOver={(e) => {
+          if (!mapping) {
+            handleDragOver(e, row, col);
+          }
+        }}
+        onDragLeave={handleDragLeave}
+        onDrop={(e) => {
+          if (!mapping) {
+            handleDrop(e, row, col);
+          }
+        }}
+        width={columnWidths[col]}
+        css={{
+          cursor: mapping ? 'default' : 'default',
+          '&[data-highlighted="true"]': {
+            backgroundColor: 'var(--accent-secondary)',
+            opacity: 0.7
+          }
+        }}
+        data-highlighted={dragOverCell?.row === row && dragOverCell?.col === col}
+        data-field-title={mapping ? getFieldTitle(mapping.sourceId) : undefined}
+      >
+        {mapping && (
+          <button 
+            className="delete-mapping"
+            onClick={handleDeleteMapping}
+            title="Remove mapping"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        )}
+        {editingCell?.row === row && editingCell?.col === col ? (
+          <CellInput
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={handleCellBlur}
+            onKeyDown={handleCellKeyDown}
+            autoFocus
+          />
+        ) : (
+          renderCellContent(content, row, col)
+        )}
+      </SheetCell>
+    );
+  };
+
   if (error) {
     return (
       <SheetPreview>
@@ -1935,21 +2094,12 @@ const GoogleSheetsPreview: React.FC<{
 
   return (
     <SheetPreview>
-      <div css={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
-        <RefreshButton
-          onClick={fetchSheetData}
-          disabled={loading}
-          title="Refresh template data"
-        >
-          <RefreshIcon />
-        </RefreshButton>
-      </div>
       <SheetGridContainer>
         <SheetGrid>
           {/* Corner and Column Headers */}
           <SheetRow height={sheetData?.rowMetadata?.[0]?.pixelSize ? `${sheetData.rowMetadata[0].pixelSize}px` : undefined}>
             <CornerCell />
-            {sheetData.headers.map((_, colIndex) => (
+            {sheetData?.headers.map((_, colIndex) => (
               <SheetCell
                 key={`col-${colIndex}`}
                 isHeader
@@ -1963,43 +2113,17 @@ const GoogleSheetsPreview: React.FC<{
           {/* Header Row with Data */}
           <SheetRow height={sheetData?.rowMetadata?.[0]?.pixelSize ? `${sheetData.rowMetadata[0].pixelSize}px` : undefined}>
             <RowHeader>1</RowHeader>
-            {sheetData.headers.map((header, col) => (
-              <SheetCell
-                key={`header-${col}`}
-                width={columnWidths[col]}
-              >
-                {renderCellContent(header, 0, col)}
-              </SheetCell>
-            ))}
+            {sheetData?.headers.map((header, col) => renderCell(header, 0, col))}
           </SheetRow>
 
           {/* Data Rows */}
-          {sheetData.values.map((row, rowIndex) => (
+          {sheetData?.values.map((row, rowIndex) => (
             <SheetRow 
               key={`row-${rowIndex}`}
               height={sheetData?.rowMetadata?.[rowIndex + 1]?.pixelSize ? `${sheetData.rowMetadata[rowIndex + 1].pixelSize}px` : undefined}
             >
               <RowHeader>{rowIndex + 2}</RowHeader>
-              {row.map((cell, colIndex) => (
-                <SheetCell
-                  key={`cell-${rowIndex}-${colIndex}`}
-                  isSelected={selectedCell?.row === rowIndex + 1 && selectedCell?.col === colIndex}
-                  onClick={() => handleCellClick(rowIndex + 1, colIndex)}
-                  width={columnWidths[colIndex]}
-                >
-                  {editingCell?.row === rowIndex + 1 && editingCell?.col === colIndex ? (
-                    <CellInput
-                      value={editValue}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      onBlur={handleCellBlur}
-                      onKeyDown={handleCellKeyDown}
-                      autoFocus
-                    />
-                  ) : (
-                    renderCellContent(cell, rowIndex + 1, colIndex)
-                  )}
-                </SheetCell>
-              ))}
+              {row.map((cell, colIndex) => renderCell(cell, rowIndex + 1, colIndex))}
             </SheetRow>
           ))}
         </SheetGrid>
@@ -2008,6 +2132,27 @@ const GoogleSheetsPreview: React.FC<{
     </SheetPreview>
   );
 };
+
+// Add new interface for template state after other interfaces
+interface TemplateState {
+  spreadsheetId: string;
+  cellMappings: CellMapping[];
+}
+
+// Add new interface for template data
+interface ExcelTemplate {
+  workbook: XLSX.WorkBook;
+  filename: string;
+}
+
+// Add the ExcelIcon component after other icon components
+const ExcelIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <path d="M8 13h8M8 17h8" />
+  </svg>
+);
 
 function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -2056,6 +2201,15 @@ function App() {
     hours: '',
     weeks: ''
   });
+  // Add state for cell mappings after other state declarations
+  const [cellMappings, setCellMappings] = useState<CellMapping[]>([]);
+  const [lastMapping, setLastMapping] = useState<CellMapping | null>(null);
+  const [templateState, setTemplateState] = useState<TemplateState>({
+    spreadsheetId: '',
+    cellMappings: []
+  });
+  // Add after other state declarations in App component
+  const [excelTemplate, setExcelTemplate] = useState<ExcelTemplate | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -2119,29 +2273,16 @@ function App() {
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-
-    if (over && active.id !== over.id) {
-      setRows((items) => {
-        const oldIndex = items.findIndex((item) => item.id === active.id);
-        const newIndex = items.findIndex((item) => item.id === over.id);
-
-        // Update selected rows
-        const newSelectedRows = new Set<number>();
-        selectedRows.forEach(index => {
-          if (index === oldIndex) {
-            newSelectedRows.add(newIndex);
-          } else if (index > oldIndex && index <= newIndex) {
-            newSelectedRows.add(index - 1);
-          } else if (index < oldIndex && index >= newIndex) {
-            newSelectedRows.add(index + 1);
-          } else {
-            newSelectedRows.add(index);
-          }
-        });
-        setSelectedRows(Array.from(newSelectedRows));
-
-        return arrayMove(items, oldIndex, newIndex);
-      });
+    
+    if (over && active.data.current?.type === 'mapping-item') {
+      const [row, col] = (over.id as string).split('-').map(Number);
+      const newMapping: CellMapping = {
+        sourceId: active.id as string,
+        targetCell: { row, col }
+      };
+      
+      setLastMapping(newMapping);
+      setCellMappings(prev => [...prev, newMapping]);
     }
   };
 
@@ -2377,24 +2518,91 @@ function App() {
     }
   };
 
-  // Handle URL input change
-  const handleSpreadsheetUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Add new function to fetch and convert template
+  const fetchAndStoreTemplate = async (spreadsheetId: string) => {
+    try {
+      setError(null);
+      console.log('Fetching template for spreadsheet ID:', spreadsheetId);
+      
+      // Fetch the Google Sheet data using the sheets API
+      const response = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1!A1:Z1000?key=${sheetsConfig.apiKey}`,
+        {
+          method: 'GET'
+        }
+      );
+
+      console.log('Template fetch response status:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Template fetch error response:', errorText);
+        throw new Error(`Failed to fetch template data: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log('Template data received:', data.values ? `${data.values.length} rows` : 'No data');
+      
+      if (!data.values || data.values.length === 0) {
+        throw new Error('Template appears to be empty. Please check that the sheet contains data.');
+      }
+
+      // Convert to XLSX format
+      console.log('Converting to XLSX format...');
+      const worksheet = XLSX.utils.aoa_to_sheet(data.values || []);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
+
+      // Store template
+      console.log('Storing template...');
+      setExcelTemplate({
+        workbook,
+        filename: `template_${spreadsheetId}.xlsx`
+      });
+
+      return true;
+    } catch (error) {
+      console.error('Template fetch error:', error);
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : 'Failed to fetch template. Please check your internet connection and try again.';
+      setError(errorMessage);
+      return false;
+    }
+  };
+
+  // Update handleSpreadsheetUrlChange to include API key check
+  const handleSpreadsheetUrlChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const url = e.target.value;
     setSpreadsheetUrl(url);
     
     if (url.trim() === '') {
       setUrlError(null);
       setSheetsConfig(prev => ({ ...prev, spreadsheetId: '' }));
+      setExcelTemplate(null);
       return;
     }
 
     const spreadsheetId = extractSpreadsheetId(url);
-    if (spreadsheetId) {
-      setUrlError(null);
-      setSheetsConfig(prev => ({ ...prev, spreadsheetId }));
-    } else {
+    if (!spreadsheetId) {
       setUrlError('Please enter a valid Google Sheets URL');
       setSheetsConfig(prev => ({ ...prev, spreadsheetId: '' }));
+      setExcelTemplate(null);
+      return;
+    }
+
+    if (!sheetsConfig.apiKey) {
+      setUrlError('Google Sheets API key is not configured. Please check your API key.');
+      return;
+    }
+
+    setUrlError(null);
+    setSheetsConfig(prev => ({ ...prev, spreadsheetId }));
+    
+    // Fetch and store template
+    const success = await fetchAndStoreTemplate(spreadsheetId);
+    if (!success) {
+      setUrlError('Failed to fetch template. Please check the URL and ensure you have access to the sheet.');
     }
   };
 
@@ -2428,28 +2636,124 @@ function App() {
   const exportToSheets = async () => {
     try {
       setExporting(true);
-      const processData = rows.map(row => ['• ' + row.processAndImpact]);
-      const componentData = rows.map(row => ['• ' + row.components]);
-      const outOfScopeData = outOfScopeItems.map(item => ['• ' + item[0]]);
-      
-      const data = {
-        headers: ['SOW Generator'],
-        values: [
-          ['Process and Impact:'],
-          ...processData,
-          [''],
-          ['Components:'],
-          ...componentData,
-          [''],
-          ['Total Build Hours:', calculateTotal()],
-          [''],
-          ['Out of Scope Items:'],
-          ...outOfScopeData,
-          ['']
-        ]
-      };
+      setError(null);
 
-      // ... rest of existing export function ...
+      if (!templateState.spreadsheetId || templateState.cellMappings.length === 0) {
+        throw new Error('No template configuration found. Please set up template mappings in Settings first.');
+      }
+
+      // Create a new spreadsheet based on the template
+      const response = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${templateState.spreadsheetId}/copy`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${sheetsConfig.apiKey}`,
+            'Content-Type': 'application/json',
+          }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to create new spreadsheet from template');
+      }
+
+      const newSpreadsheet = await response.json();
+      const newSpreadsheetId = newSpreadsheet.spreadsheetId;
+
+      // Prepare the updates based on mappings
+      const updates = templateState.cellMappings.map(mapping => {
+        const { sourceId, targetCell } = mapping;
+        let value = '';
+
+        // Get the value based on the source field
+        if (sourceId.startsWith('roleHours.')) {
+          const role = sourceId.split('.')[1] as keyof RoleHours;
+          value = roleHours[role];
+        } else if (sourceId.startsWith('hypercare.')) {
+          const field = sourceId.split('.')[1] as keyof Hypercare;
+          value = hypercare[field];
+        } else {
+          switch (sourceId) {
+            case 'process':
+              value = rows.map(row => row.processAndImpact).join('\n\n');
+              break;
+            case 'components':
+              value = rows.map(row => row.components).join('\n\n');
+              break;
+            case 'assumptions':
+              value = rows.map(row => row.assumptions).join('\n\n');
+              break;
+            case 'hours':
+              value = calculateTotal();
+              break;
+            case 'notes':
+              value = rows.map(row => row.notes).join('\n\n');
+              break;
+            case 'outOfScope':
+              value = outOfScopeItems.map(item => item[0]).join('\n\n');
+              break;
+          }
+        }
+
+        // Convert 0-based to A1 notation
+        const column = String.fromCharCode(65 + targetCell.col);
+        const row = targetCell.row + 1;
+        const range = `Sheet1!${column}${row}`;
+
+        return {
+          range,
+          values: [[value]],
+          userEnteredFormat: {
+            textFormat: {
+              bold: false,  // Default format, will be overridden by rich text
+            },
+            wrapStrategy: 'WRAP'
+          }
+        };
+      });
+
+      // Batch update the new spreadsheet with values and formatting
+      const updateResponse = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${newSpreadsheetId}:batchUpdate`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${sheetsConfig.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            requests: [
+              {
+                updateCells: {
+                  rows: updates.map(update => ({
+                    values: [{
+                      userEnteredValue: { stringValue: update.values[0][0] },
+                      userEnteredFormat: update.userEnteredFormat
+                    }]
+                  })),
+                  fields: 'userEnteredValue,userEnteredFormat',
+                  range: {
+                    sheetId: 0,
+                    startRowIndex: Math.min(...templateState.cellMappings.map(m => m.targetCell.row)),
+                    endRowIndex: Math.max(...templateState.cellMappings.map(m => m.targetCell.row)) + 1,
+                    startColumnIndex: Math.min(...templateState.cellMappings.map(m => m.targetCell.col)),
+                    endColumnIndex: Math.max(...templateState.cellMappings.map(m => m.targetCell.col)) + 1
+                  }
+                }
+              }
+            ]
+          })
+        }
+      );
+
+      if (!updateResponse.ok) {
+        throw new Error('Failed to update spreadsheet with values');
+      }
+
+      // Open the new spreadsheet in a new tab
+      window.open(`https://docs.google.com/spreadsheets/d/${newSpreadsheetId}`, '_blank');
+      
     } catch (error) {
       console.error('Export error:', error);
       setError(error instanceof Error ? error.message : 'Failed to export to Sheets');
@@ -2534,6 +2838,171 @@ function App() {
     }));
   };
 
+  const UndoButton = styled.button`
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--text-tertiary);
+    border-radius: 0.25rem;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    
+    &:hover {
+      background: var(--bg-tertiary);
+    }
+    
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  `;
+
+  // Add after the fetchAndStoreTemplate function
+  const applyMappingsToTemplate = (): XLSX.WorkBook | null => {
+    if (!excelTemplate || !templateState.cellMappings.length) {
+      setError('No template or mappings found');
+      return null;
+    }
+
+    try {
+      // Create a deep copy of the template workbook
+      const workbook = XLSX.utils.book_new();
+      const originalSheet = excelTemplate.workbook.Sheets['Sheet1'];
+      const newSheet = { ...originalSheet }; // Clone the sheet
+      workbook.Sheets['Sheet1'] = newSheet;
+      workbook.SheetNames = ['Sheet1'];
+
+      // Apply each mapping
+      templateState.cellMappings.forEach(mapping => {
+        const { sourceId, targetCell } = mapping;
+        let value = '';
+
+        // Get the value based on the source field
+        if (sourceId.startsWith('roleHours.')) {
+          const role = sourceId.split('.')[1] as keyof RoleHours;
+          value = roleHours[role];
+        } else if (sourceId.startsWith('hypercare.')) {
+          const field = sourceId.split('.')[1] as keyof Hypercare;
+          value = hypercare[field];
+        } else {
+          switch (sourceId) {
+            case 'process':
+              value = rows.map(row => row.processAndImpact).join('\n\n');
+              break;
+            case 'components':
+              value = rows.map(row => row.components).join('\n\n');
+              break;
+            case 'assumptions':
+              value = rows.map(row => row.assumptions).join('\n\n');
+              break;
+            case 'hours':
+              value = calculateTotal().toString();
+              break;
+            case 'notes':
+              value = rows.map(row => row.notes).join('\n\n');
+              break;
+            case 'outOfScope':
+              value = outOfScopeItems.map(item => item[0]).join('\n\n');
+              break;
+          }
+        }
+
+        // Convert to Excel cell reference (e.g., A1, B2)
+        const cellRef = XLSX.utils.encode_cell({
+          r: targetCell.row,
+          c: targetCell.col
+        });
+
+        // Update cell in the sheet
+        newSheet[cellRef] = {
+          t: 's', // Type: string
+          v: value, // Raw value
+          w: value, // Formatted text
+          s: { // Style - maintain wrapped text
+            alignment: {
+              wrapText: true,
+              vertical: 'top'
+            }
+          }
+        };
+      });
+
+      return workbook;
+    } catch (error) {
+      console.error('Error applying mappings:', error);
+      setError('Failed to apply mappings to template');
+      return null;
+    }
+  };
+
+  // Update the export function with debugging
+  const exportToExcel = async () => {
+    console.log('Export started');
+    console.log('Template state:', templateState);
+    console.log('Excel template:', excelTemplate);
+    
+    try {
+      setError(null);
+      setExporting(true);
+
+      // Check if we're in settings mode and have a template
+      if (!excelTemplate?.workbook) {
+        throw new Error('No template available. Please go to Settings, enter a valid Google Sheets URL, and wait for the template to load.');
+      }
+
+      if (!templateState.cellMappings.length) {
+        throw new Error('No mappings configured. Please go to Settings and map your fields to template cells.');
+      }
+
+      console.log('Applying mappings...');
+      // Apply mappings to get the final workbook
+      const workbook = applyMappingsToTemplate();
+      if (!workbook) {
+        throw new Error('Failed to prepare workbook for export. Please check your mappings in Settings.');
+      }
+
+      console.log('Generating Excel file...');
+      // Generate Excel file
+      const excelBuffer = XLSX.write(workbook, {
+        bookType: 'xlsx',
+        type: 'array'
+      });
+
+      // Convert to Blob
+      const blob = new Blob([excelBuffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      });
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Generate filename with timestamp
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+      link.download = `sow_export_${timestamp}.xlsx`;
+      
+      console.log('Triggering download...');
+      // Trigger download
+      document.body.appendChild(link);
+      link.click();
+      
+      // Cleanup
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      console.log('Export completed successfully');
+
+    } catch (error) {
+      console.error('Export error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to export Excel file');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <GlobalStyle isDarkMode={isDarkMode}>
       <Container>
@@ -2561,45 +3030,164 @@ function App() {
       <div>
             <ConfigSection>
               <h2 css={{ marginBottom: '1rem', color: 'var(--text-primary)' }}>Template Configuration</h2>
-              <div css={{ marginBottom: '2rem' }}>
-                <Label htmlFor="spreadsheetUrl">Google Sheets Template URL</Label>
-                <Input
-                  id="spreadsheetUrl"
-                  value={spreadsheetUrl}
-                  onChange={handleSpreadsheetUrlChange}
-                  placeholder="Paste your Google Sheets URL here"
-                  css={{ marginBottom: '0.5rem' }}
-                />
-                {urlError && (
-                  <div css={{ 
-                    color: 'var(--error-color)',
-                    fontSize: '0.875rem',
-                    marginTop: '0.25rem'
-                  }}>
-                    {urlError}
+              <div css={{ 
+                display: 'flex', 
+                gap: '2rem',
+                alignItems: 'flex-start',
+                marginBottom: '1rem'  // Reduced from 2rem
+              }}>
+                <div css={{ flex: '1' }}>
+                  <Label htmlFor="spreadsheetUrl">Google Sheets Template URL</Label>
+                  <div css={{ display: 'flex', gap: '1rem', alignItems: 'flex-end' }}>
+                    <Input
+                      id="spreadsheetUrl"
+                      value={spreadsheetUrl}
+                      onChange={handleSpreadsheetUrlChange}
+                      placeholder="Paste your Google Sheets URL here"
+                      css={{ marginBottom: '0.5rem' }}
+                    />
       </div>
-                )}
-                <div css={{ 
-                  fontSize: '0.875rem',
-                  color: 'var(--text-secondary)',
-                  marginTop: '0.5rem'
-                }}>
-                  Steps to share your template:
-                  <ol css={{ marginTop: '0.5rem', paddingLeft: '1.25rem' }}>
-                    <li>Open your Google Sheet template</li>
-                    <li>Click "Share" in the top right</li>
-                    <li>Set access to "Anyone with the link can view"</li>
-                    <li>Copy the URL and paste it above</li>
-                  </ol>
+                  {urlError && (
+                    <div css={{ 
+                      color: 'var(--error-color)',
+                      fontSize: '0.875rem',
+                      marginTop: '0.25rem'
+                    }}>
+                      {urlError}
       </div>
+                  )}
+                </div>
+              </div>
+
+              <div css={{ 
+                fontSize: '0.875rem',
+                color: 'var(--text-secondary)',
+                marginTop: '0.5rem'
+              }}>
+                Steps to share your template:
+                <ol css={{ marginTop: '0.5rem', paddingLeft: '1.25rem' }}>
+                  <li>Open your Google Sheet template</li>
+                  <li>Click "Share" in the top right</li>
+                  <li>Set access to "Anyone with the link can view"</li>
+                  <li>Copy the URL and paste it above</li>
+                </ol>
               </div>
             </ConfigSection>
-            
+
             {sheetsConfig.spreadsheetId && (
-              <GoogleSheetsPreview
-                config={sheetsConfig}
-                onDataLoaded={handleSheetDataLoaded}
-              />
+              <>
+                <MappingContainer css={{ marginTop: '1rem' }}>
+                  <div css={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: '1.5rem'
+                  }}>
+                    <MappingTitle css={{ margin: 0 }}>Map SOW Fields to Template</MappingTitle>
+                    <div css={{ display: 'flex', gap: '1rem' }}>
+                      <Button
+                        onClick={() => {
+                          setCellMappings([]);
+                        }}
+                        css={{
+                          backgroundColor: 'var(--bg-secondary)',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--text-tertiary)'
+                        }}
+                      >
+                        Reset Mappings
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          if (cellMappings.length > 0) {
+                            setTemplateState({
+                              spreadsheetId: sheetsConfig.spreadsheetId,
+                              cellMappings: cellMappings
+                            });
+                            setShowSettings(false);
+                          }
+                        }}
+                        disabled={cellMappings.length === 0}
+                        css={{
+                          backgroundColor: 'var(--accent-primary)',
+                        }}
+                      >
+                        Apply Template
+                      </Button>
+                    </div>
+                  </div>
+                  <div css={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                    gap: '1rem',
+                    marginBottom: '1.5rem'
+                  }}>
+                    {[
+                      { id: 'process', label: 'Process & Impact' },
+                      { id: 'components', label: 'Components' },
+                      { id: 'assumptions', label: 'Assumptions' },
+                      { id: 'hours', label: 'Hours' },
+                      { id: 'notes', label: 'Notes' },
+                      { id: 'outOfScope', label: 'Out of Scope Items' },
+                      // Role Hours - Individual pills
+                      { id: 'roleHours.sa', label: 'SA Hours' },
+                      { id: 'roleHours.consultant', label: 'Consultant Hours' },
+                      { id: 'roleHours.pm', label: 'PM Hours' },
+                      { id: 'roleHours.el', label: 'EL Hours' },
+                      { id: 'roleHours.specialty', label: 'Specialty Hours' },
+                      // Hypercare components
+                      { id: 'hypercare.hours', label: 'Hypercare Hours' },
+                      { id: 'hypercare.weeks', label: 'Hypercare Weeks' }
+                    ].map(field => {
+                      const isMapped = cellMappings.some(mapping => mapping.sourceId === field.id);
+                      return (
+                        <div
+                          key={field.id}
+                          css={{
+                            padding: '0.75rem',
+                            background: 'var(--bg-tertiary)',
+                            border: '2px solid var(--text-tertiary)',
+                            borderRadius: '0.5rem',
+                            cursor: isMapped ? 'not-allowed' : 'grab',
+                            userSelect: 'none',
+                            transition: 'all 0.2s ease',
+                            opacity: isMapped ? 0.5 : 1,
+                            filter: isMapped ? 'blur(1px)' : 'none',
+                            pointerEvents: isMapped ? 'none' : 'all',
+                            '&:hover': !isMapped ? {
+                              borderColor: 'var(--accent-primary)',
+                              transform: 'translateY(-1px)'
+                            } : {}
+                          }}
+                          draggable={!isMapped}
+                          onDragStart={(e) => {
+                            if (!isMapped) {
+                              e.dataTransfer.setData('text/plain', field.id);
+                              e.dataTransfer.effectAllowed = 'move';
+                            }
+                          }}
+                        >
+                          {field.label}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div css={{
+                    fontSize: '0.875rem',
+                    color: 'var(--text-secondary)',
+                    marginBottom: '1rem'
+                  }}>
+                    Drag and drop the fields above onto cells in the template below to create mappings.
+                  </div>
+                </MappingContainer>
+                <GoogleSheetsPreview
+                  config={sheetsConfig}
+                  onDataLoaded={handleSheetDataLoaded}
+                  setLastMapping={setLastMapping}
+                  setCellMappings={setCellMappings}
+                  cellMappings={cellMappings}
+                />
+              </>
             )}
           </div>
         ) : (
@@ -2669,10 +3257,28 @@ function App() {
                   <DuplicateIcon />
                   Duplicate Row
                 </DuplicateButton>
-                <ExportButton onClick={handleExport}>
-                  <ExportIcon />
-                  Export to Sheets
-                </ExportButton>
+                <Button
+                  onClick={() => {
+                    console.log('Export button clicked');
+                    exportToExcel();
+                  }}
+                  disabled={!templateState.cellMappings.length || exporting}
+                  title={!templateState.cellMappings.length ? 'Please configure template mappings in Settings first' : ''}
+                  css={{
+                    backgroundColor: 'var(--accent-primary)',
+                    opacity: (!templateState.cellMappings.length || exporting) ? 0.5 : 1,
+                    cursor: (!templateState.cellMappings.length || exporting) ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    '&:not(:disabled):hover': {
+                      backgroundColor: 'var(--accent-secondary)'
+                    }
+                  }}
+                >
+                  <ExcelIcon />
+                  {exporting ? 'Exporting...' : 'Export to Excel'}
+                </Button>
               </ActionButtons>
               <TotalSection>
                 <TotalLabel>Total Build Hours:</TotalLabel>
