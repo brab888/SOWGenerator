@@ -5,7 +5,7 @@ import StarterKit from '@tiptap/starter-kit';
 import TextStyle from '@tiptap/extension-text-style';
 import TextAlign from '@tiptap/extension-text-align';
 import Color from '@tiptap/extension-color';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import styled from '@emotion/styled';
 import {
   DndContext,
@@ -2143,6 +2143,9 @@ interface TemplateState {
 interface ExcelTemplate {
   workbook: XLSX.WorkBook;
   filename: string;
+  originalStyles?: {
+    [key: string]: any;  // Store original cell styles
+  };
 }
 
 // Add the ExcelIcon component after other icon components
@@ -2153,6 +2156,28 @@ const ExcelIcon = () => (
     <path d="M8 13h8M8 17h8" />
   </svg>
 );
+
+// Add helper functions for Excel unit conversions
+const pixelsToExcelWidth = (pixels?: number) => pixels ? pixels / 7 : undefined;
+const pixelsToExcelHeight = (pixels?: number) => pixels ? pixels * 0.75 : undefined;
+
+// Add helper function for border style conversion
+const getExcelBorderStyle = (style?: string) => {
+  switch (style?.toLowerCase()) {
+    case 'solid':
+      return 'thin';
+    case 'solid_medium':
+      return 'medium';
+    case 'solid_thick':
+      return 'thick';
+    case 'dotted':
+      return 'dotted';
+    case 'dashed':
+      return 'dashed';
+    default:
+      return 'thin';
+  }
+};
 
 function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -2524,9 +2549,9 @@ function App() {
       setError(null);
       console.log('Fetching template for spreadsheet ID:', spreadsheetId);
       
-      // Fetch the Google Sheet data using the sheets API
+      // Fetch the Google Sheet data with complete formatting
       const response = await fetch(
-        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Sheet1!A1:Z1000?key=${sheetsConfig.apiKey}`,
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?includeGridData=true&fields=sheets(data(rowData/values(userEnteredFormat,formattedValue),rowMetadata,columnMetadata))&key=${sheetsConfig.apiKey}`,
         {
           method: 'GET'
         }
@@ -2540,24 +2565,136 @@ function App() {
         throw new Error(`Failed to fetch template data: ${response.status} ${response.statusText}`);
       }
 
-      const data = await response.json();
-      console.log('Template data received:', data.values ? `${data.values.length} rows` : 'No data');
+      const sheetData = await response.json();
+      console.log('Template data received:', sheetData);
       
-      if (!data.values || data.values.length === 0) {
+      if (!sheetData.sheets?.[0]?.data?.[0]?.rowData) {
         throw new Error('Template appears to be empty. Please check that the sheet contains data.');
       }
 
-      // Convert to XLSX format
-      console.log('Converting to XLSX format...');
-      const worksheet = XLSX.utils.aoa_to_sheet(data.values || []);
+      const gridData = sheetData.sheets[0].data[0];
+      const rowData = gridData.rowData || [];
+      const columnMetadata = gridData.columnMetadata || [];
+      const rowMetadata = gridData.rowMetadata || [];
+
+      // Extract cell data and styles
+      const values: any[][] = [];
+      const styles: { [key: string]: any } = {};
+
+      // Store column widths
+      const colsConfig = columnMetadata.map((col: any) => ({
+        width: pixelsToExcelWidth(col.pixelSize),
+        customWidth: true
+      }));
+
+      // Store row heights
+      const rowsConfig = rowMetadata.map((row: any) => ({
+        height: pixelsToExcelHeight(row.pixelSize),
+        customHeight: true
+      }));
+
+      rowData.forEach((row: any, rowIndex: number) => {
+        if (!row.values) return;
+        
+        const rowValues: any[] = [];
+        row.values.forEach((cell: any, colIndex: number) => {
+          // Get cell value
+          rowValues.push(cell.formattedValue || '');
+          
+          // Store cell styles if present
+          if (cell.userEnteredFormat) {
+            const format = cell.userEnteredFormat;
+            const cellRef = XLSX.utils.encode_cell({ r: rowIndex, c: colIndex });
+            
+            const cellStyle: any = {
+              fill: format.backgroundColor && {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { 
+                  rgb: rgbToHex(
+                    format.backgroundColor.red,
+                    format.backgroundColor.green,
+                    format.backgroundColor.blue,
+                    format.backgroundColor.alpha
+                  )
+                }
+              },
+              font: {
+                name: format.textFormat?.fontFamily || 'Calibri',
+                sz: format.textFormat?.fontSize || 11,
+                bold: format.textFormat?.bold || false,
+                italic: format.textFormat?.italic || false,
+                color: format.textFormat?.foregroundColor && {
+                  rgb: rgbToHex(
+                    format.textFormat.foregroundColor.red,
+                    format.textFormat.foregroundColor.green,
+                    format.textFormat.foregroundColor.blue,
+                    format.textFormat.foregroundColor.alpha
+                  )
+                }
+              },
+              alignment: {
+                horizontal: format.horizontalAlignment?.toLowerCase() || 'left',
+                vertical: format.verticalAlignment?.toLowerCase() || 'bottom',
+                wrapText: format.wrapStrategy === 'WRAP'
+              },
+              border: {
+                top: {
+                  style: getExcelBorderStyle(format.borders?.top?.style),
+                  color: { rgb: 'D0D0D0' }
+                },
+                bottom: {
+                  style: getExcelBorderStyle(format.borders?.bottom?.style),
+                  color: { rgb: 'D0D0D0' }
+                },
+                left: {
+                  style: getExcelBorderStyle(format.borders?.left?.style),
+                  color: { rgb: 'D0D0D0' }
+                },
+                right: {
+                  style: getExcelBorderStyle(format.borders?.right?.style),
+                  color: { rgb: 'D0D0D0' }
+                }
+              }
+            };
+
+            // Only include properties that are actually set
+            styles[cellRef] = Object.fromEntries(
+              Object.entries(cellStyle).filter(([_, value]) => value !== undefined)
+            );
+          }
+        });
+        values.push(rowValues);
+      });
+
+      // Create workbook with styles
+      const worksheet = XLSX.utils.aoa_to_sheet(values);
+      
+      // Apply stored styles
+      Object.keys(styles).forEach(cellRef => {
+        if (!worksheet[cellRef]) {
+          worksheet[cellRef] = { v: '', s: styles[cellRef] };
+        } else {
+          worksheet[cellRef].s = styles[cellRef];
+        }
+      });
+
+      // Apply column widths and row heights
+      worksheet['!cols'] = colsConfig;
+      worksheet['!rows'] = rowsConfig;
+
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
 
-      // Store template
-      console.log('Storing template...');
+      // Store template with original styles
       setExcelTemplate({
         workbook,
-        filename: `template_${spreadsheetId}.xlsx`
+        filename: `template_${spreadsheetId}.xlsx`,
+        originalStyles: {
+          styles,
+          cols: colsConfig,
+          rows: rowsConfig
+        }
       });
 
       return true;
@@ -2569,6 +2706,16 @@ function App() {
       setError(errorMessage);
       return false;
     }
+  };
+
+  // Update the rgbToHex function to handle alpha channel
+  const rgbToHex = (r?: number, g?: number, b?: number, a?: number) => {
+    if (r === undefined || g === undefined || b === undefined) return undefined;
+    const toHex = (n: number) => {
+      const hex = Math.round((n || 0) * 255).toString(16);
+      return hex.length === 1 ? '0' + hex : hex;
+    };
+    return (a !== undefined && a !== 1 ? toHex(a) : '') + toHex(r) + toHex(g) + toHex(b);
   };
 
   // Update handleSpreadsheetUrlChange to include API key check
