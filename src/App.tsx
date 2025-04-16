@@ -2179,6 +2179,81 @@ const getExcelBorderStyle = (style?: string) => {
   }
 };
 
+// Add HTML parsing utilities
+interface ExcelTextRun {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  color?: string;
+}
+
+const parseHtmlToExcelFormat = (html: string): ExcelTextRun[] => {
+  // Create a temporary div to parse HTML
+  const div = document.createElement('div');
+  div.innerHTML = html.trim();
+  
+  const result: ExcelTextRun[] = [];
+  
+  const parseNode = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      // Handle text content
+      const text = node.textContent?.trim();
+      if (text) {
+        const parentElement = node.parentElement;
+        const run: ExcelTextRun = { text };
+
+        // Check for formatting
+        if (parentElement) {
+          // Bold
+          if (parentElement.tagName === 'STRONG' || parentElement.style.fontWeight === 'bold') {
+            run.bold = true;
+          }
+          // Italic
+          if (parentElement.tagName === 'EM' || parentElement.style.fontStyle === 'italic') {
+            run.italic = true;
+          }
+          // Color
+          const color = parentElement.style.color;
+          if (color) {
+            // Convert RGB color to hex
+            const rgb = color.match(/\d+/g);
+            if (rgb) {
+              run.color = rgb.map(x => {
+                const hex = parseInt(x).toString(16);
+                return hex.length === 1 ? '0' + hex : hex;
+              }).join('');
+            }
+          }
+        }
+        result.push(run);
+      }
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      // Handle list items
+      if (node.nodeName === 'UL' || node.nodeName === 'OL') {
+        Array.from(node.childNodes).forEach((child, index) => {
+          if (child.nodeName === 'LI') {
+            // Add bullet point or number
+            result.push({ text: node.nodeName === 'UL' ? '• ' : `${index + 1}. ` });
+            parseNode(child);
+            result.push({ text: '\n' });
+          }
+        });
+      } else {
+        // Recursively parse child nodes
+        node.childNodes.forEach(child => parseNode(child));
+        
+        // Add newline after paragraphs and list items
+        if (node.nodeName === 'P' || node.nodeName === 'LI') {
+          result.push({ text: '\n' });
+        }
+      }
+    }
+  };
+  
+  parseNode(div);
+  return result;
+};
+
 function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -3022,60 +3097,109 @@ function App() {
       workbook.Sheets['Sheet1'] = newSheet;
       workbook.SheetNames = ['Sheet1'];
 
+      // Find the starting row for data (after headers)
+      const dataStartRow = 8; // Based on template structure
+
       // Apply each mapping
       templateState.cellMappings.forEach(mapping => {
         const { sourceId, targetCell } = mapping;
-        let value = '';
 
-        // Get the value based on the source field
-        if (sourceId.startsWith('roleHours.')) {
-          const role = sourceId.split('.')[1] as keyof RoleHours;
-          value = roleHours[role];
-        } else if (sourceId.startsWith('hypercare.')) {
-          const field = sourceId.split('.')[1] as keyof Hypercare;
-          value = hypercare[field];
+        if (sourceId.startsWith('roleHours.') || sourceId.startsWith('hypercare.')) {
+          // Handle single-value mappings (role hours and hypercare)
+          let value = '';
+          if (sourceId.startsWith('roleHours.')) {
+            const role = sourceId.split('.')[1] as keyof RoleHours;
+            value = roleHours[role];
+          } else {
+            const field = sourceId.split('.')[1] as keyof Hypercare;
+            value = hypercare[field];
+          }
+
+          const cellRef = XLSX.utils.encode_cell({
+            r: targetCell.row,
+            c: targetCell.col
+          });
+
+          newSheet[cellRef] = {
+            t: 's',
+            v: value,
+            w: value,
+            s: originalSheet[cellRef]?.s || { alignment: { wrapText: true, vertical: 'top' } }
+          };
         } else {
+          // Handle multi-row data
+          let sourceData: string[] = [];
           switch (sourceId) {
             case 'process':
-              value = rows.map(row => row.processAndImpact).join('\n\n');
+              sourceData = rows.map(row => row.processAndImpact);
               break;
             case 'components':
-              value = rows.map(row => row.components).join('\n\n');
+              sourceData = rows.map(row => row.components);
               break;
             case 'assumptions':
-              value = rows.map(row => row.assumptions).join('\n\n');
+              sourceData = rows.map(row => row.assumptions);
               break;
             case 'hours':
-              value = calculateTotal().toString();
+              sourceData = rows.map(row => row.hours);
               break;
             case 'notes':
-              value = rows.map(row => row.notes).join('\n\n');
+              sourceData = rows.map(row => row.notes);
               break;
             case 'outOfScope':
-              value = outOfScopeItems.map(item => item[0]).join('\n\n');
+              sourceData = outOfScopeItems.map(item => item[0]);
               break;
           }
+
+          // Create a new row for each item
+          sourceData.forEach((value, index) => {
+            const cellRef = XLSX.utils.encode_cell({
+              r: dataStartRow + index,
+              c: targetCell.col
+            });
+
+            // Get the style from the template's corresponding cell
+            const templateCellRef = XLSX.utils.encode_cell({
+              r: targetCell.row,
+              c: targetCell.col
+            });
+
+            // Parse and clean HTML content
+            const cleanValue = parseHtmlToExcelFormat(value)
+              .map(run => run.text)
+              .join('')
+              .trim();
+
+            // Create cell with clean text and preserved formatting
+            newSheet[cellRef] = {
+              t: 's',
+              v: cleanValue,
+              w: cleanValue,
+              s: {
+                ...(originalSheet[templateCellRef]?.s || {}),
+                alignment: { wrapText: true, vertical: 'top' }
+              }
+            };
+          });
         }
-
-        // Convert to Excel cell reference (e.g., A1, B2)
-        const cellRef = XLSX.utils.encode_cell({
-          r: targetCell.row,
-          c: targetCell.col
-        });
-
-        // Update cell in the sheet
-        newSheet[cellRef] = {
-          t: 's', // Type: string
-          v: value, // Raw value
-          w: value, // Formatted text
-          s: { // Style - maintain wrapped text
-            alignment: {
-              wrapText: true,
-              vertical: 'top'
-            }
-          }
-        };
       });
+
+      // Update the sheet's dimension references
+      const range = XLSX.utils.decode_range(newSheet['!ref'] || 'A1');
+      range.e.r = Math.max(range.e.r, dataStartRow + rows.length - 1);
+      newSheet['!ref'] = XLSX.utils.encode_range(range);
+
+      // Preserve column widths and row properties
+      if (excelTemplate.originalStyles) {
+        newSheet['!cols'] = excelTemplate.originalStyles.cols;
+        
+        // Extend row properties for new rows
+        const baseRowStyle = excelTemplate.originalStyles.rows[dataStartRow] || {};
+        const extendedRows = [...(excelTemplate.originalStyles.rows || [])];
+        for (let i = extendedRows.length; i <= dataStartRow + rows.length; i++) {
+          extendedRows[i] = { ...baseRowStyle };
+        }
+        newSheet['!rows'] = extendedRows;
+      }
 
       return workbook;
     } catch (error) {
