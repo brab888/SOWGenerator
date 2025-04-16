@@ -2254,6 +2254,62 @@ const parseHtmlToExcelFormat = (html: string): ExcelTextRun[] => {
   return result;
 };
 
+// Add ContractIcon component after other icons
+const ContractIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+    <path d="M19 5v14H5V5h14m0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+  </svg>
+);
+
+// Add styled components after existing styled components and before the App function
+const ScopeTable = styled.table`
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--bg-secondary);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  margin-top: 1rem;
+`;
+
+const ScopeTableHeader = styled.th`
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  padding: 1rem;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid var(--text-tertiary);
+`;
+
+const ScopeTableCell = styled.td`
+  padding: 1rem;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--text-tertiary);
+  vertical-align: top;
+`;
+
+const ScopeCheckbox = styled.input`
+  margin-right: 1rem;
+  width: 1.2rem;
+  height: 1.2rem;
+  cursor: pointer;
+`;
+
+const AddScopeButton = styled.button`
+  background-color: var(--accent-primary);
+  color: white;
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 0.375rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+  margin-bottom: 1.5rem;
+
+  &:hover {
+    opacity: 0.9;
+  }
+`;
+
 function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -2310,6 +2366,8 @@ function App() {
   });
   // Add after other state declarations in App component
   const [excelTemplate, setExcelTemplate] = useState<ExcelTemplate | null>(null);
+  // Add showScopeLibrary state near other state declarations
+  const [showScopeLibrary, setShowScopeLibrary] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -3279,15 +3337,43 @@ function App() {
       <Container>
         <HeaderContainer>
           <Title>
-            {showSettings ? 'Settings' : 'SOW Generator'}
+            {showSettings ? 'Settings' : showScopeLibrary ? 'Scope Library' : 'SOW Generator'}
           </Title>
           <HeaderActions>
-            <NavButton
-              onClick={() => setShowSettings(!showSettings)}
-              title={showSettings ? 'Back to SOW Generator' : 'Settings'}
-            >
-              {showSettings ? <DocumentIcon /> : <SettingsIcon />}
-            </NavButton>
+            {!showSettings && !showScopeLibrary && (
+              <NavButton
+                onClick={() => setShowScopeLibrary(true)}
+                title="Scope Library"
+                css={{
+                  backgroundColor: 'var(--bg-secondary)',
+                  color: 'var(--text-primary)',
+                  padding: '0.5rem 1rem',
+                  borderRadius: '0.375rem',
+                  transition: 'all 0.2s ease',
+                  '&:hover': {
+                    backgroundColor: 'var(--bg-tertiary)'
+                  }
+                }}
+              >
+                Scope Library
+              </NavButton>
+            )}
+            {!showScopeLibrary && (
+              <NavButton
+                onClick={() => setShowSettings(!showSettings)}
+                title={showSettings ? 'Back to SOW Generator' : 'Settings'}
+              >
+                {showSettings ? <DocumentIcon /> : <SettingsIcon />}
+              </NavButton>
+            )}
+            {showScopeLibrary && (
+              <NavButton
+                onClick={() => setShowScopeLibrary(false)}
+                title="Back to SOW Generator"
+              >
+                <DocumentIcon />
+              </NavButton>
+            )}
             <ThemeToggleButton
               onClick={() => setIsDarkMode(!isDarkMode)}
               title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
@@ -3297,171 +3383,7 @@ function App() {
           </HeaderActions>
         </HeaderContainer>
 
-        {showSettings ? (
-      <div>
-            <ConfigSection>
-              <h2 css={{ marginBottom: '1rem', color: 'var(--text-primary)' }}>Template Configuration</h2>
-              <div css={{ 
-                display: 'flex', 
-                gap: '2rem',
-                alignItems: 'flex-start',
-                marginBottom: '1rem'  // Reduced from 2rem
-              }}>
-                <div css={{ flex: '1' }}>
-                  <Label htmlFor="spreadsheetUrl">Google Sheets Template URL</Label>
-                  <div css={{ display: 'flex', gap: '1rem', alignItems: 'flex-end' }}>
-                    <Input
-                      id="spreadsheetUrl"
-                      value={spreadsheetUrl}
-                      onChange={handleSpreadsheetUrlChange}
-                      placeholder="Paste your Google Sheets URL here"
-                      css={{ marginBottom: '0.5rem' }}
-                    />
-      </div>
-                  {urlError && (
-                    <div css={{ 
-                      color: 'var(--error-color)',
-                      fontSize: '0.875rem',
-                      marginTop: '0.25rem'
-                    }}>
-                      {urlError}
-      </div>
-                  )}
-                </div>
-              </div>
-
-              <div css={{ 
-                fontSize: '0.875rem',
-                color: 'var(--text-secondary)',
-                marginTop: '0.5rem'
-              }}>
-                Steps to share your template:
-                <ol css={{ marginTop: '0.5rem', paddingLeft: '1.25rem' }}>
-                  <li>Open your Google Sheet template</li>
-                  <li>Click "Share" in the top right</li>
-                  <li>Set access to "Anyone with the link can view"</li>
-                  <li>Copy the URL and paste it above</li>
-                </ol>
-              </div>
-            </ConfigSection>
-
-            {sheetsConfig.spreadsheetId && (
-              <>
-                <MappingContainer css={{ marginTop: '1rem' }}>
-                  <div css={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: '1.5rem'
-                  }}>
-                    <MappingTitle css={{ margin: 0 }}>Map SOW Fields to Template</MappingTitle>
-                    <div css={{ display: 'flex', gap: '1rem' }}>
-                      <Button
-                        onClick={() => {
-                          setCellMappings([]);
-                        }}
-                        css={{
-                          backgroundColor: 'var(--bg-secondary)',
-                          color: 'var(--text-primary)',
-                          border: '1px solid var(--text-tertiary)'
-                        }}
-                      >
-                        Reset Mappings
-                      </Button>
-                      <Button
-                        onClick={() => {
-                          if (cellMappings.length > 0) {
-                            setTemplateState({
-                              spreadsheetId: sheetsConfig.spreadsheetId,
-                              cellMappings: cellMappings
-                            });
-                            setShowSettings(false);
-                          }
-                        }}
-                        disabled={cellMappings.length === 0}
-                        css={{
-                          backgroundColor: 'var(--accent-primary)',
-                        }}
-                      >
-                        Apply Template
-                      </Button>
-                    </div>
-                  </div>
-                  <div css={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                    gap: '1rem',
-                    marginBottom: '1.5rem'
-                  }}>
-                    {[
-                      { id: 'process', label: 'Process & Impact' },
-                      { id: 'components', label: 'Components' },
-                      { id: 'assumptions', label: 'Assumptions' },
-                      { id: 'hours', label: 'Hours' },
-                      { id: 'notes', label: 'Notes' },
-                      { id: 'outOfScope', label: 'Out of Scope Items' },
-                      // Role Hours - Individual pills
-                      { id: 'roleHours.sa', label: 'SA Hours' },
-                      { id: 'roleHours.consultant', label: 'Consultant Hours' },
-                      { id: 'roleHours.pm', label: 'PM Hours' },
-                      { id: 'roleHours.el', label: 'EL Hours' },
-                      { id: 'roleHours.specialty', label: 'Specialty Hours' },
-                      // Hypercare components
-                      { id: 'hypercare.hours', label: 'Hypercare Hours' },
-                      { id: 'hypercare.weeks', label: 'Hypercare Weeks' }
-                    ].map(field => {
-                      const isMapped = cellMappings.some(mapping => mapping.sourceId === field.id);
-                      return (
-                        <div
-                          key={field.id}
-                          css={{
-                            padding: '0.75rem',
-                            background: 'var(--bg-tertiary)',
-                            border: '2px solid var(--text-tertiary)',
-                            borderRadius: '0.5rem',
-                            cursor: isMapped ? 'not-allowed' : 'grab',
-                            userSelect: 'none',
-                            transition: 'all 0.2s ease',
-                            opacity: isMapped ? 0.5 : 1,
-                            filter: isMapped ? 'blur(1px)' : 'none',
-                            pointerEvents: isMapped ? 'none' : 'all',
-                            '&:hover': !isMapped ? {
-                              borderColor: 'var(--accent-primary)',
-                              transform: 'translateY(-1px)'
-                            } : {}
-                          }}
-                          draggable={!isMapped}
-                          onDragStart={(e) => {
-                            if (!isMapped) {
-                              e.dataTransfer.setData('text/plain', field.id);
-                              e.dataTransfer.effectAllowed = 'move';
-                            }
-                          }}
-                        >
-                          {field.label}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div css={{
-                    fontSize: '0.875rem',
-                    color: 'var(--text-secondary)',
-                    marginBottom: '1rem'
-                  }}>
-                    Drag and drop the fields above onto cells in the template below to create mappings.
-                  </div>
-                </MappingContainer>
-                <GoogleSheetsPreview
-                  config={sheetsConfig}
-                  onDataLoaded={handleSheetDataLoaded}
-                  setLastMapping={setLastMapping}
-                  setCellMappings={setCellMappings}
-                  cellMappings={cellMappings}
-                />
-              </>
-            )}
-          </div>
-        ) : (
+        {!showSettings && !showScopeLibrary ? (
           // SOW Generator Content
           <>
             <ColumnsContainer>
@@ -3883,6 +3805,260 @@ function App() {
               cancelText="Cancel"
             />
           </>
+        ) : showSettings ? (
+          // Settings Content
+          <div>
+            <ConfigSection>
+              <h2 css={{ marginBottom: '1rem', color: 'var(--text-primary)' }}>Template Configuration</h2>
+              <div css={{ 
+                display: 'flex', 
+                gap: '2rem',
+                alignItems: 'flex-start',
+                marginBottom: '1rem'  // Reduced from 2rem
+              }}>
+                <div css={{ flex: '1' }}>
+                  <Label htmlFor="spreadsheetUrl">Google Sheets Template URL</Label>
+                  <div css={{ display: 'flex', gap: '1rem', alignItems: 'flex-end' }}>
+                    <Input
+                      id="spreadsheetUrl"
+                      value={spreadsheetUrl}
+                      onChange={handleSpreadsheetUrlChange}
+                      placeholder="Paste your Google Sheets URL here"
+                      css={{ marginBottom: '0.5rem' }}
+                    />
+      </div>
+                  {urlError && (
+                    <div css={{ 
+                      color: 'var(--error-color)',
+                      fontSize: '0.875rem',
+                      marginTop: '0.25rem'
+                    }}>
+                      {urlError}
+      </div>
+                  )}
+                </div>
+              </div>
+
+              <div css={{ 
+                fontSize: '0.875rem',
+                color: 'var(--text-secondary)',
+                marginTop: '0.5rem'
+              }}>
+                Steps to share your template:
+                <ol css={{ marginTop: '0.5rem', paddingLeft: '1.25rem' }}>
+                  <li>Open your Google Sheet template</li>
+                  <li>Click "Share" in the top right</li>
+                  <li>Set access to "Anyone with the link can view"</li>
+                  <li>Copy the URL and paste it above</li>
+                </ol>
+              </div>
+            </ConfigSection>
+
+            {sheetsConfig.spreadsheetId && (
+              <>
+                <MappingContainer css={{ marginTop: '1rem' }}>
+                  <div css={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: '1.5rem'
+                  }}>
+                    <MappingTitle css={{ margin: 0 }}>Map SOW Fields to Template</MappingTitle>
+                    <div css={{ display: 'flex', gap: '1rem' }}>
+                      <Button
+                        onClick={() => {
+                          setCellMappings([]);
+                        }}
+                        css={{
+                          backgroundColor: 'var(--bg-secondary)',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--text-tertiary)'
+                        }}
+                      >
+                        Reset Mappings
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          if (cellMappings.length > 0) {
+                            setTemplateState({
+                              spreadsheetId: sheetsConfig.spreadsheetId,
+                              cellMappings: cellMappings
+                            });
+                            setShowSettings(false);
+                          }
+                        }}
+                        disabled={cellMappings.length === 0}
+                        css={{
+                          backgroundColor: 'var(--accent-primary)',
+                        }}
+                      >
+                        Apply Template
+                      </Button>
+                    </div>
+                  </div>
+                  <div css={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                    gap: '1rem',
+                    marginBottom: '1.5rem'
+                  }}>
+                    {[
+                      { id: 'process', label: 'Process & Impact' },
+                      { id: 'components', label: 'Components' },
+                      { id: 'assumptions', label: 'Assumptions' },
+                      { id: 'hours', label: 'Hours' },
+                      { id: 'notes', label: 'Notes' },
+                      { id: 'outOfScope', label: 'Out of Scope Items' },
+                      // Role Hours - Individual pills
+                      { id: 'roleHours.sa', label: 'SA Hours' },
+                      { id: 'roleHours.consultant', label: 'Consultant Hours' },
+                      { id: 'roleHours.pm', label: 'PM Hours' },
+                      { id: 'roleHours.el', label: 'EL Hours' },
+                      { id: 'roleHours.specialty', label: 'Specialty Hours' },
+                      // Hypercare components
+                      { id: 'hypercare.hours', label: 'Hypercare Hours' },
+                      { id: 'hypercare.weeks', label: 'Hypercare Weeks' }
+                    ].map(field => {
+                      const isMapped = cellMappings.some(mapping => mapping.sourceId === field.id);
+                      return (
+                        <div
+                          key={field.id}
+                          css={{
+                            padding: '0.75rem',
+                            background: 'var(--bg-tertiary)',
+                            border: '2px solid var(--text-tertiary)',
+                            borderRadius: '0.5rem',
+                            cursor: isMapped ? 'not-allowed' : 'grab',
+                            userSelect: 'none',
+                            transition: 'all 0.2s ease',
+                            opacity: isMapped ? 0.5 : 1,
+                            filter: isMapped ? 'blur(1px)' : 'none',
+                            pointerEvents: isMapped ? 'none' : 'all',
+                            '&:hover': !isMapped ? {
+                              borderColor: 'var(--accent-primary)',
+                              transform: 'translateY(-1px)'
+                            } : {}
+                          }}
+                          draggable={!isMapped}
+                          onDragStart={(e) => {
+                            if (!isMapped) {
+                              e.dataTransfer.setData('text/plain', field.id);
+                              e.dataTransfer.effectAllowed = 'move';
+                            }
+                          }}
+                        >
+                          {field.label}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div css={{
+                    fontSize: '0.875rem',
+                    color: 'var(--text-secondary)',
+                    marginBottom: '1rem'
+                  }}>
+                    Drag and drop the fields above onto cells in the template below to create mappings.
+                  </div>
+                </MappingContainer>
+                <GoogleSheetsPreview
+                  config={sheetsConfig}
+                  onDataLoaded={handleSheetDataLoaded}
+                  setLastMapping={setLastMapping}
+                  setCellMappings={setCellMappings}
+                  cellMappings={cellMappings}
+                />
+              </>
+            )}
+          </div>
+        ) : (
+          // Scope Library Content
+          <div css={{ padding: '2rem' }}>
+            <AddScopeButton>Add Selected Scope</AddScopeButton>
+            <ScopeTable>
+              <thead>
+                <tr>
+                  <ScopeTableHeader css={{ width: '40px' }}></ScopeTableHeader>
+                  <ScopeTableHeader>Process and Impact</ScopeTableHeader>
+                  <ScopeTableHeader>Components</ScopeTableHeader>
+                  <ScopeTableHeader>Assumptions</ScopeTableHeader>
+                  <ScopeTableHeader>Hours</ScopeTableHeader>
+                  <ScopeTableHeader>Notes</ScopeTableHeader>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  {
+                    processAndImpact: 'Configure and implement Lead conversion process to standardize the qualification and conversion of Leads to Opportunities',
+                    components: 'Lead object configuration with custom fields and page layouts',
+                    assumptions: 'Client will provide final sign-off on sales process design before configuration begins',
+                    hours: '10',
+                    notes: 'May require additional fields based on client requirements'
+                  },
+                  {
+                    processAndImpact: 'Design and implement Opportunity stages to align with sales process, including probability and forecast categories',
+                    components: 'Opportunity object setup with sales stages and custom fields',
+                    assumptions: 'Up to 10 custom fields per standard object',
+                    hours: '8',
+                    notes: 'Includes standard Salesforce probability mapping'
+                  },
+                  {
+                    processAndImpact: 'Create validation rules to ensure data quality and process compliance',
+                    components: 'Account and Contact object customization for B2B sales process',
+                    assumptions: 'Single currency implementation',
+                    hours: '12',
+                    notes: 'Complex validation rules may require additional hours'
+                  },
+                  {
+                    processAndImpact: 'Implement sales performance tracking and reporting',
+                    components: 'Sales dashboard with key metrics (pipeline, conversion rates, forecasting)',
+                    assumptions: 'English language only',
+                    hours: '8',
+                    notes: 'Custom dashboard components may require additional licensing'
+                  },
+                  // Service Cloud Implementation Items
+                  {
+                    processAndImpact: 'Configure case management workflow with automated case assignment and escalation rules',
+                    components: 'Case object configuration, assignment rules, and escalation matrix setup',
+                    assumptions: 'Maximum of 3 different case record types',
+                    hours: '16',
+                    notes: 'Includes standard case assignment and escalation rules'
+                  },
+                  {
+                    processAndImpact: 'Implement knowledge base structure and article types for customer self-service',
+                    components: 'Knowledge object setup, article types configuration, and data categories',
+                    assumptions: 'Up to 5 article types with standard fields',
+                    hours: '12',
+                    notes: 'Knowledge license required for all service agents'
+                  },
+                  {
+                    processAndImpact: 'Setup service console with custom components and macros for agent efficiency',
+                    components: 'Service Console configuration with quick actions, macros, and keyboard shortcuts',
+                    assumptions: 'Standard Service Console license for all agents',
+                    hours: '14',
+                    notes: 'Custom console components may require additional development'
+                  },
+                  {
+                    processAndImpact: 'Configure customer satisfaction surveys and feedback collection process',
+                    components: 'Survey template setup, automation rules, and reporting dashboards',
+                    assumptions: 'Using standard Salesforce Surveys feature',
+                    hours: '8',
+                    notes: 'Survey response automation requires additional configuration'
+                  }
+                ].map((item, index) => (
+                  <tr key={index}>
+                    <ScopeTableCell css={{ width: '40px' }}>
+                      <ScopeCheckbox type="checkbox" />
+                    </ScopeTableCell>
+                    <ScopeTableCell>{item.processAndImpact}</ScopeTableCell>
+                    <ScopeTableCell>{item.components}</ScopeTableCell>
+                    <ScopeTableCell>{item.assumptions}</ScopeTableCell>
+                    <ScopeTableCell>{item.hours}</ScopeTableCell>
+                    <ScopeTableCell>{item.notes}</ScopeTableCell>
+                  </tr>
+                ))}
+              </tbody>
+            </ScopeTable>
+          </div>
         )}
       </Container>
     </GlobalStyle>
